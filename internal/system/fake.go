@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"syscall"
 	"time"
 )
 
@@ -23,7 +22,7 @@ type FakeFileSystem struct {
 	ReadFileFunc func(path string) ([]byte, error)
 	StatFunc     func(path string) (os.FileInfo, error)
 	WalkDirFunc  func(root string, fn fs.WalkDirFunc) error
-	StatfsFunc   func(path string) (*syscall.Statfs_t, error)
+	StatfsFunc   func(path string) (FsInfo, error)
 }
 
 func (f FakeFileSystem) ReadFile(path string) ([]byte, error) {
@@ -47,11 +46,11 @@ func (f FakeFileSystem) WalkDir(root string, fn fs.WalkDirFunc) error {
 	return os.ErrNotExist
 }
 
-func (f FakeFileSystem) Statfs(path string) (*syscall.Statfs_t, error) {
+func (f FakeFileSystem) Statfs(path string) (FsInfo, error) {
 	if f.StatfsFunc != nil {
 		return f.StatfsFunc(path)
 	}
-	return nil, errors.New("not implemented")
+	return FsInfo{}, errors.New("not implemented")
 }
 
 type FakeFileInfo struct {

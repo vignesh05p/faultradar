@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"syscall"
 	"testing"
 
 	"faultradar/internal/model"
@@ -15,8 +14,8 @@ func TestDoctorRun(t *testing.T) {
 	config := model.DefaultConfig()
 
 	fsMock := system.FakeFileSystem{
-		StatfsFunc: func(path string) (*syscall.Statfs_t, error) {
-			return &syscall.Statfs_t{Blocks: 100, Bfree: 80, Bavail: 80}, nil
+		StatfsFunc: func(path string) (system.FsInfo, error) {
+			return system.FsInfo{Blocks: 100, Bfree: 80, Bavail: 80}, nil
 		},
 		StatFunc: func(path string) (os.FileInfo, error) {
 			return system.FakeFileInfo{NameVal: "log", IsDirVal: true}, nil

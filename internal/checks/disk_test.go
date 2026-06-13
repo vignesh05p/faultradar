@@ -2,7 +2,6 @@ package checks
 
 import (
 	"errors"
-	"syscall"
 	"testing"
 
 	"faultradar/internal/model"
@@ -14,8 +13,8 @@ func TestCheckDisk(t *testing.T) {
 
 	t.Run("normal usage", func(t *testing.T) {
 		fs := system.FakeFileSystem{
-			StatfsFunc: func(path string) (*syscall.Statfs_t, error) {
-				return &syscall.Statfs_t{
+			StatfsFunc: func(path string) (system.FsInfo, error) {
+				return system.FsInfo{
 					Blocks: 100,
 					Bfree:  50,
 					Bavail: 50,
@@ -34,8 +33,8 @@ func TestCheckDisk(t *testing.T) {
 
 	t.Run("warning usage", func(t *testing.T) {
 		fs := system.FakeFileSystem{
-			StatfsFunc: func(path string) (*syscall.Statfs_t, error) {
-				return &syscall.Statfs_t{
+			StatfsFunc: func(path string) (system.FsInfo, error) {
+				return system.FsInfo{
 					Blocks: 100,
 					Bfree:  15,
 					Bavail: 15,
@@ -51,8 +50,8 @@ func TestCheckDisk(t *testing.T) {
 
 	t.Run("critical usage", func(t *testing.T) {
 		fs := system.FakeFileSystem{
-			StatfsFunc: func(path string) (*syscall.Statfs_t, error) {
-				return &syscall.Statfs_t{
+			StatfsFunc: func(path string) (system.FsInfo, error) {
+				return system.FsInfo{
 					Blocks: 100,
 					Bfree:  4,
 					Bavail: 4,
@@ -68,8 +67,8 @@ func TestCheckDisk(t *testing.T) {
 
 	t.Run("statfs error", func(t *testing.T) {
 		fs := system.FakeFileSystem{
-			StatfsFunc: func(path string) (*syscall.Statfs_t, error) {
-				return nil, errors.New("statfs failed")
+			StatfsFunc: func(path string) (system.FsInfo, error) {
+				return system.FsInfo{}, errors.New("statfs failed")
 			},
 		}
 

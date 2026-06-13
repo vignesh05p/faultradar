@@ -1,13 +1,13 @@
-//go:build !windows
+//go:build windows
 
 package system
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 )
 
 type RealCommandRunner struct{}
@@ -32,14 +32,5 @@ func (RealFileSystem) WalkDir(root string, fn fs.WalkDirFunc) error {
 }
 
 func (RealFileSystem) Statfs(path string) (FsInfo, error) {
-	var stat syscall.Statfs_t
-	err := syscall.Statfs(path, &stat)
-	if err != nil {
-		return FsInfo{}, err
-	}
-	return FsInfo{
-		Blocks: uint64(stat.Blocks),
-		Bfree:  uint64(stat.Bfree),
-		Bavail: uint64(stat.Bavail),
-	}, nil
+	return FsInfo{}, errors.New("statfs is not supported on windows")
 }
