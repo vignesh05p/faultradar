@@ -33,8 +33,21 @@ func TestPrinter(t *testing.T) {
 			Title:    "Log files size looks normal",
 			Summary:  "Total log size is 100 MB.",
 		},
+		{
+			ID:       "some.info.id",
+			Severity: model.SeverityInfo,
+			Title:    "System info diagnostic",
+			Summary:  "Normal system metadata.",
+		},
+		{
+			ID:       "some.skipped.id",
+			Severity: model.SeveritySkipped,
+			Title:    "Skipped check info",
+			Summary:  "Failed to run check.",
+		},
 	}
 
+	// 1. JSON parses
 	t.Run("JSON output parses", func(t *testing.T) {
 		var buf bytes.Buffer
 		err := PrintJSON(&buf, findings)
@@ -48,38 +61,60 @@ func TestPrinter(t *testing.T) {
 			t.Fatalf("Failed to parse printed JSON: %v", err)
 		}
 
-		if len(parsed) != 3 {
-			t.Errorf("expected 3 findings, got %d", len(parsed))
-		}
-		if parsed[0].ID != "disk.root.usage" {
-			t.Errorf("expected ID %q, got %q", "disk.root.usage", parsed[0].ID)
+		if len(parsed) != 5 {
+			t.Errorf("expected 5 findings, got %d", len(parsed))
 		}
 	})
 
-	t.Run("human output groups severities", func(t *testing.T) {
+	// 2. no extra text in JSON
+	t.Run("no extra text in JSON", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := PrintJSON(&buf, findings)
+		if err != nil {
+			t.Fatalf("PrintJSON failed: %v", err)
+		}
+		trimmed := strings.TrimSpace(buf.String())
+		if !strings.HasPrefix(trimmed, "[") || !strings.HasSuffix(trimmed, "]") {
+			t.Errorf("JSON output has extra text or invalid root container: %s", trimmed)
+		}
+	})
+
+	// 3. human output groups severity in correct order
+	t.Run("human output groups severity in correct order", func(t *testing.T) {
 		var buf bytes.Buffer
 		PrintHuman(&buf, "1.0.0", findings)
 		out := buf.String()
 
 		if !strings.Contains(out, "FaultRadar v1.0.0") {
-			t.Errorf("expected output to contain version header")
-		}
-		if !strings.Contains(out, "CRITICAL") {
-			t.Errorf("expected output to contain CRITICAL group")
-		}
-		if !strings.Contains(out, "WARNING") {
-			t.Errorf("expected output to contain WARNING group")
-		}
-		if !strings.Contains(out, "OK") {
-			t.Errorf("expected output to contain OK group")
+			t.Errorf("expected version header")
 		}
 
 		critIdx := strings.Index(out, "CRITICAL")
 		warnIdx := strings.Index(out, "WARNING")
+		infoIdx := strings.Index(out, "INFO")
+		skipIdx := strings.Index(out, "SKIPPED")
 		okIdx := strings.Index(out, "OK")
 
-		if critIdx > warnIdx || warnIdx > okIdx {
-			t.Errorf("expected groups to be ordered: CRITICAL, WARNING, OK")
+		if critIdx == -1 || warnIdx == -1 || infoIdx == -1 || skipIdx == -1 || okIdx == -1 {
+			t.Errorf("expected all severity headers to be present")
+		}
+
+		if !(critIdx < warnIdx && warnIdx < infoIdx && infoIdx < skipIdx && skipIdx < okIdx) {
+			t.Errorf("severity groups printed in incorrect order: crit=%d warn=%d info=%d skip=%d ok=%d", critIdx, warnIdx, infoIdx, skipIdx, okIdx)
+		}
+	})
+
+	// 4. skipped group appears if skipped finding exists
+	t.Run("skipped group appears if skipped finding exists", func(t *testing.T) {
+		var buf bytes.Buffer
+		PrintHuman(&buf, "1.0.0", findings)
+		out := buf.String()
+
+		if !strings.Contains(out, "SKIPPED") {
+			t.Errorf("expected output to contain SKIPPED group header")
+		}
+		if !strings.Contains(out, "Skipped check info") {
+			t.Errorf("expected output to contain skipped check details")
 		}
 	})
 }

@@ -12,12 +12,15 @@ type Config struct {
 	} `json:"logs"`
 
 	Kernel struct {
-		MaxErrorLinesWarning  int `json:"max_error_lines_warning"`
-		MaxErrorLinesCritical int `json:"max_error_lines_critical"`
+		UnknownErrorWarningCount int      `json:"unknown_error_warning_count"`
+		DowngradePatterns        []string `json:"downgrade_patterns"`
+		IgnorePatterns           []string `json:"ignore_patterns"`
 	} `json:"kernel"`
 
 	Systemd struct {
-		IgnoreUnits []string `json:"ignore_units"`
+		IgnoreUnits        []string `json:"ignore_units"`
+		IgnoreUnitPatterns []string `json:"ignore_unit_patterns"`
+		ImportantUnits     []string `json:"important_units"`
 	} `json:"systemd"`
 
 	Memory struct {
@@ -31,12 +34,29 @@ func DefaultConfig() Config {
 	var c Config
 	c.Disk.RootWarningPercent = 85
 	c.Disk.RootCriticalPercent = 95
+
 	c.Logs.VarLogWarningMB = 1024
 	c.Logs.VarLogCriticalMB = 5120
-	c.Kernel.MaxErrorLinesWarning = 5
-	c.Kernel.MaxErrorLinesCritical = 25
+
+	c.Kernel.UnknownErrorWarningCount = 10
+	c.Kernel.IgnorePatterns = []string{}
+	c.Kernel.DowngradePatterns = []string{}
+
+	c.Systemd.IgnoreUnits = []string{}
+	c.Systemd.IgnoreUnitPatterns = []string{}
+	c.Systemd.ImportantUnits = []string{
+		"mysql.service",
+		"postgresql.service",
+		"docker.service",
+		"containerd.service",
+		"ssh.service",
+		"sshd.service",
+		"NetworkManager.service",
+		"systemd-resolved.service",
+		"systemd-journald.service",
+	}
+
 	c.Memory.AvailableWarningPercent = 15
 	c.Memory.AvailableCriticalPercent = 5
-	c.Systemd.IgnoreUnits = []string{}
 	return c
 }

@@ -8,12 +8,31 @@
     "varlog_critical_mb": 5120
   },
   "kernel": {
-    "max_error_lines_warning": 5,
-    "max_error_lines_critical": 25
+    "unknown_error_warning_count": 10,
+    "ignore_patterns": [
+      "some-noise-pattern"
+    ],
+    "downgrade_patterns": [
+      "some-non-critical-acpi-error"
+    ]
   },
   "systemd": {
     "ignore_units": [
       "bluetooth.service"
+    ],
+    "ignore_unit_patterns": [
+      "snap-*.mount"
+    ],
+    "important_units": [
+      "mysql.service",
+      "postgresql.service",
+      "docker.service",
+      "containerd.service",
+      "ssh.service",
+      "sshd.service",
+      "NetworkManager.service",
+      "systemd-resolved.service",
+      "systemd-journald.service"
     ]
   },
   "memory": {

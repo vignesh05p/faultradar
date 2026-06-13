@@ -17,8 +17,8 @@ func PrintHuman(w io.Writer, version string, findings []model.Finding) {
 		model.SeverityCritical: {},
 		model.SeverityWarning:  {},
 		model.SeverityInfo:     {},
-		model.SeverityOK:       {},
 		model.SeveritySkipped:  {},
+		model.SeverityOK:       {},
 	}
 
 	for _, f := range findings {
@@ -32,8 +32,8 @@ func PrintHuman(w io.Writer, version string, findings []model.Finding) {
 		{model.SeverityCritical, "CRITICAL"},
 		{model.SeverityWarning, "WARNING"},
 		{model.SeverityInfo, "INFO"},
-		{model.SeverityOK, "OK"},
 		{model.SeveritySkipped, "SKIPPED"},
+		{model.SeverityOK, "OK"},
 	}
 
 	counter := 1
@@ -57,7 +57,6 @@ func PrintHuman(w io.Writer, version string, findings []model.Finding) {
 
 // PrintJSON serializes the findings to w in JSON format.
 func PrintJSON(w io.Writer, findings []model.Finding) error {
-	// Ensure empty slice is serialized as [] instead of null
 	if findings == nil {
 		findings = []model.Finding{}
 	}
@@ -68,16 +67,9 @@ func PrintJSON(w io.Writer, findings []model.Finding) error {
 
 func printFinding(w io.Writer, f model.Finding, index int) {
 	fmt.Fprintf(w, "[%d] %s\n", index, f.Title)
-	if f.Severity == model.SeverityOK {
-		return
-	}
 
 	if f.Summary != "" {
 		fmt.Fprintf(w, "    %s\n", f.Summary)
-	}
-
-	for _, detail := range f.Details {
-		fmt.Fprintf(w, "    %s\n", detail)
 	}
 
 	if f.Suggestion != "" {
@@ -87,5 +79,12 @@ func printFinding(w io.Writer, f model.Finding, index int) {
 	if f.CheckCommand != "" {
 		fmt.Fprintln(w, "    Check:")
 		fmt.Fprintf(w, "      %s\n", f.CheckCommand)
+	}
+
+	if len(f.Details) > 0 {
+		fmt.Fprintln(w, "    Details:")
+		for _, detail := range f.Details {
+			fmt.Fprintf(w, "      %s\n", detail)
+		}
 	}
 }

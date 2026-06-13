@@ -75,3 +75,73 @@ func TestDoctorRun(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadConfig(t *testing.T) {
+	// 1. defaults load
+	t.Run("defaults load when no file exists", func(t *testing.T) {
+		fsMock := system.FakeFileSystem{
+			ReadFileFunc: func(path string) ([]byte, error) {
+				return nil, fs.ErrNotExist
+			},
+		}
+
+		config, findings := LoadConfig(fsMock)
+		if len(findings) != 0 {
+			t.Errorf("expected no config findings, got %d", len(findings))
+		}
+		if config.Disk.RootWarningPercent != 85 {
+			t.Errorf("expected default root warning percent 85, got %d", config.Disk.RootWarningPercent)
+		}
+	})
+
+	// 2. user config overrides defaults
+	t.Run("user config overrides defaults", func(t *testing.T) {
+		fsMock := system.FakeFileSystem{
+			ReadFileFunc: func(path string) ([]byte, error) {
+				// Supplying custom warning percent for disk and ignore units for systemd
+				return []byte(`{
+					"disk": {
+						"root_warning_percent": 90
+					},
+					"systemd": {
+						"ignore_units": ["cups.service"]
+					}
+				}`), nil
+			},
+		}
+
+		config, findings := LoadConfig(fsMock)
+		if len(findings) != 0 {
+			t.Errorf("expected no config findings, got %d", len(findings))
+		}
+		if config.Disk.RootWarningPercent != 90 {
+			t.Errorf("expected overridden disk root warning percent 90, got %d", config.Disk.RootWarningPercent)
+		}
+		if config.Disk.RootCriticalPercent != 95 {
+			t.Errorf("expected default disk root critical percent 95 to remain, got %d", config.Disk.RootCriticalPercent)
+		}
+		if len(config.Systemd.IgnoreUnits) != 1 || config.Systemd.IgnoreUnits[0] != "cups.service" {
+			t.Errorf("expected systemd ignore_units overridden, got %v", config.Systemd.IgnoreUnits)
+		}
+	})
+
+	// 3. invalid config handled cleanly
+	t.Run("invalid config handled cleanly", func(t *testing.T) {
+		fsMock := system.FakeFileSystem{
+			ReadFileFunc: func(path string) ([]byte, error) {
+				return []byte(`{invalid-json}`), nil
+			},
+		}
+
+		config, findings := LoadConfig(fsMock)
+		if len(findings) != 1 {
+			t.Errorf("expected 1 finding for config load error, got %d", len(findings))
+		}
+		if findings[0].Severity != model.SeverityWarning {
+			t.Errorf("expected warning severity, got %v", findings[0].Severity)
+		}
+		if config.Disk.RootWarningPercent != 85 {
+			t.Errorf("expected default fallback config on load error, got %d", config.Disk.RootWarningPercent)
+		}
+	})
+}
