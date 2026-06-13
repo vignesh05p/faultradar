@@ -1,0 +1,23 @@
+{
+  "disk": {
+    "root_warning_percent": 85,
+    "root_critical_percent": 95
+  },
+  "logs": {
+    "varlog_warning_mb": 1024,
+    "varlog_critical_mb": 5120
+  },
+  "kernel": {
+    "max_error_lines_warning": 5,
+    "max_error_lines_critical": 25
+  },
+  "systemd": {
+    "ignore_units": [
+      "bluetooth.service"
+    ]
+  },
+  "memory": {
+    "available_warning_percent": 15,
+    "available_critical_percent": 5
+  }
+}
