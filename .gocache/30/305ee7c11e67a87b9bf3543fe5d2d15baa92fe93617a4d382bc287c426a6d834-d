@@ -1,5 +1,0 @@
-./command.go
-./fake.go
-./files.go
-./interfaces.go
-./real.go
