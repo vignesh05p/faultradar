@@ -12,7 +12,6 @@ import (
 func CheckDisk(fs system.FileSystem, cfg config.Config) model.Finding {
 	finding := model.Finding{
 		ID:           "disk.root.usage",
-		Title:        "Root disk usage check",
 		CheckCommand: "df -h /",
 	}
 
@@ -33,25 +32,28 @@ func CheckDisk(fs system.FileSystem, cfg config.Config) model.Finding {
 		percent = int((used*100 + totalUsable - 1) / totalUsable)
 	}
 
-	warningThreshold := cfg.Disk.RootWarningPercent
-	criticalThreshold := cfg.Disk.RootCriticalPercent
+	warningThreshold := cfg.Disk.WarningPercent
+	criticalThreshold := cfg.Disk.CriticalPercent
 
 	if percent >= criticalThreshold {
 		finding.Severity = model.SeverityCritical
 		finding.Title = "Root disk is almost full"
-		finding.Summary = fmt.Sprintf("Root disk usage is critically high: %d%%.", percent)
+		finding.Summary = fmt.Sprintf("Root filesystem is %d%% used.", percent)
 		finding.Suggestion = "Free disk space before updates or apps start failing."
 	} else if percent >= warningThreshold {
 		finding.Severity = model.SeverityWarning
 		finding.Title = "Root disk usage is high"
-		finding.Summary = fmt.Sprintf("Root disk usage is high: %d%%.", percent)
-		finding.Suggestion = "Consider cleaning up old logs, cache, or unused packages."
+		finding.Summary = fmt.Sprintf("Root filesystem is %d%% used.", percent)
+		finding.Suggestion = "Free disk space before updates or apps start failing."
 	} else {
 		finding.Severity = model.SeverityOK
 		finding.Title = "Root disk usage looks normal"
 		finding.Summary = fmt.Sprintf("Root disk usage is %d%%.", percent)
 	}
 
-	finding.Details = []string{fmt.Sprintf("Root filesystem is %d%% used.", percent)}
+	finding.Details = []string{
+		fmt.Sprintf("Mount: /"),
+		fmt.Sprintf("Used: %d%%", percent),
+	}
 	return finding
 }

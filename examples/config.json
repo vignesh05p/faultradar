@@ -1,42 +1,22 @@
 {
-  "disk": {
-    "root_warning_percent": 85,
-    "root_critical_percent": 95
-  },
-  "logs": {
-    "varlog_warning_mb": 1024,
-    "varlog_critical_mb": 5120
-  },
   "kernel": {
-    "unknown_error_warning_count": 10,
-    "ignore_patterns": [
-      "some-noise-pattern"
-    ],
-    "downgrade_patterns": [
-      "some-non-critical-acpi-error"
-    ]
+    "ignore_patterns": [],
+    "downgrade_patterns": []
   },
   "systemd": {
-    "ignore_units": [
-      "bluetooth.service"
-    ],
-    "ignore_unit_patterns": [
-      "snap-*.mount"
-    ],
-    "important_units": [
-      "mysql.service",
-      "postgresql.service",
-      "docker.service",
-      "containerd.service",
-      "ssh.service",
-      "sshd.service",
-      "NetworkManager.service",
-      "systemd-resolved.service",
-      "systemd-journald.service"
-    ]
+    "ignore_units": [],
+    "important_units": []
+  },
+  "logs": {
+    "warning_mb": 1024,
+    "critical_mb": 5120
+  },
+  "disk": {
+    "warning_percent": 90,
+    "critical_percent": 97
   },
   "memory": {
-    "available_warning_percent": 15,
-    "available_critical_percent": 5
+    "warning_available_percent": 10,
+    "critical_available_percent": 5
   }
 }

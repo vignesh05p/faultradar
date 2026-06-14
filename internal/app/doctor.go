@@ -25,14 +25,13 @@ func (d Doctor) Run() []model.Finding {
 	findings = append(findings, checks.CheckLogs(d.FS, d.Config))
 	findings = append(findings, checks.CheckSystemd(d.Runner, d.Config)...)
 	findings = append(findings, checks.CheckKernel(d.Runner, d.Config))
-	findings = append(findings, checks.CheckMemory(d.FS, d.Config))
+	findings = append(findings, checks.CheckMemory(d.FS, d.Config)...)
 
 	return findings
 }
 
 // LoadConfig searches for the configuration file in standard locations
 // and decodes it, fallback to default config if none is found.
-// It returns the config and optionally a list of warning findings if loading had non-fatal errors.
 func LoadConfig(fs system.FileSystem) (config.Config, []model.Finding) {
 	defaultConf := config.DefaultConfig()
 	var findings []model.Finding
@@ -74,6 +73,7 @@ func LoadConfig(fs system.FileSystem) (config.Config, []model.Finding) {
 		return defaultConf, findings
 	}
 
+	findings = append(findings, checks.ValidateKernelPatterns(userConf)...)
 	return userConf, findings
 }
 

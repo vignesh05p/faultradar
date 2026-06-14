@@ -20,17 +20,17 @@ func TestPrinter(t *testing.T) {
 			CheckCommand: "df -h /",
 		},
 		{
-			ID:           "memory.available",
+			ID:           "memory.low",
 			Severity:     model.SeverityWarning,
 			Title:        "Memory available is low",
-			Summary:      "Memory is 12% available.",
+			Summary:      "Memory is 8% available.",
 			Suggestion:   "Close apps.",
 			CheckCommand: "free -h",
 		},
 		{
 			ID:       "logs.varlog.size",
 			Severity: model.SeverityOK,
-			Title:    "Log files size looks normal",
+			Title:    "Log storage looks normal",
 			Summary:  "Total log size is 100 MB.",
 		},
 		{
@@ -47,7 +47,6 @@ func TestPrinter(t *testing.T) {
 		},
 	}
 
-	// 1. JSON parses
 	t.Run("JSON output parses", func(t *testing.T) {
 		var buf bytes.Buffer
 		err := PrintJSON(&buf, findings)
@@ -66,8 +65,7 @@ func TestPrinter(t *testing.T) {
 		}
 	})
 
-	// 2. no extra text in JSON
-	t.Run("no extra text in JSON", func(t *testing.T) {
+	t.Run("JSON is valid and pure", func(t *testing.T) {
 		var buf bytes.Buffer
 		err := PrintJSON(&buf, findings)
 		if err != nil {
@@ -79,13 +77,12 @@ func TestPrinter(t *testing.T) {
 		}
 	})
 
-	// 3. human output groups severity in correct order
-	t.Run("human output groups severity in correct order", func(t *testing.T) {
+	t.Run("human severity ordering", func(t *testing.T) {
 		var buf bytes.Buffer
-		PrintHuman(&buf, "0.2.0", findings)
+		PrintHuman(&buf, "1.0.0", findings)
 		out := buf.String()
 
-		if !strings.Contains(out, "FaultRadar v0.2.0") {
+		if !strings.Contains(out, "FaultRadar v1.0.0") {
 			t.Errorf("expected version header")
 		}
 
@@ -100,14 +97,24 @@ func TestPrinter(t *testing.T) {
 		}
 
 		if !(critIdx < warnIdx && warnIdx < infoIdx && infoIdx < skipIdx && skipIdx < okIdx) {
-			t.Errorf("severity groups printed in incorrect order: crit=%d warn=%d info=%d skip=%d ok=%d", critIdx, warnIdx, infoIdx, skipIdx, okIdx)
+			t.Errorf("severity groups printed in incorrect order")
 		}
 	})
 
-	// 4. skipped group appears if skipped finding exists
+	t.Run("no empty sections", func(t *testing.T) {
+		var buf bytes.Buffer
+		PrintHuman(&buf, "1.0.0", []model.Finding{
+			{ID: "disk.root.usage", Severity: model.SeverityOK, Title: "Root disk ok", Summary: "42% used."},
+		})
+		out := buf.String()
+		if strings.Contains(out, "CRITICAL") || strings.Contains(out, "WARNING") {
+			t.Errorf("expected no empty severity sections")
+		}
+	})
+
 	t.Run("skipped group appears if skipped finding exists", func(t *testing.T) {
 		var buf bytes.Buffer
-		PrintHuman(&buf, "0.2.0", findings)
+		PrintHuman(&buf, "1.0.0", findings)
 		out := buf.String()
 
 		if !strings.Contains(out, "SKIPPED") {

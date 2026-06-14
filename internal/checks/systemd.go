@@ -10,46 +10,55 @@ import (
 	"faultradar/internal/system"
 )
 
-// CheckSystemd checks for failed systemd units, returning separate findings for services/other units and snap mounts.
-func CheckSystemd(runner system.CommandRunner, cfg config.Config) []model.Finding {
-	failedUnitsFinding := model.Finding{
-		ID:           "systemd.failed_units",
-		Title:        "Failed systemd services check",
-		CheckCommand: "systemctl --failed --no-pager --plain",
+var defaultImportantUnits = []string{
+	"mysql.service",
+	"postgresql.service",
+	"docker.service",
+	"containerd.service",
+	"ssh.service",
+	"sshd.service",
+	"NetworkManager.service",
+	"gdm.service",
+	"sddm.service",
+	"lightdm.service",
+	"display-manager.service",
+}
+
+func isImportantUnit(unitName string, importantUnits []string) bool {
+	for _, imp := range importantUnits {
+		if imp == unitName {
+			return true
+		}
+		matched, err := path.Match(imp, unitName)
+		if err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
+
+func isIgnoredUnit(unitName string, cfg config.Config) bool {
+	for _, iu := range cfg.Systemd.IgnoreUnits {
+		if iu == unitName {
+			return true
+		}
+	}
+	for _, ip := range cfg.Systemd.IgnoreUnitPatterns {
+		matched, err := path.Match(ip, unitName)
+		if err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
+
+func parseFailedUnits(output string, cfg config.Config) (services, snapMounts, mounts, timers, sockets, others []string) {
+	importantUnits := cfg.Systemd.ImportantUnits
+	if len(importantUnits) == 0 {
+		importantUnits = defaultImportantUnits
 	}
 
-	failedSnapFinding := model.Finding{
-		ID:           "systemd.failed_snap_mounts",
-		Title:        "Failed snap mount units check",
-		CheckCommand: "systemctl --failed --no-pager --plain",
-	}
-
-	outputBytes, err := runner.Run("systemctl", "--failed", "--no-pager", "--plain")
-	output := string(outputBytes)
-
-	if err != nil && !strings.Contains(output, "loaded units listed") {
-		failedUnitsFinding.Severity = model.SeveritySkipped
-		failedUnitsFinding.Title = "Systemd diagnostics unavailable"
-		failedUnitsFinding.Summary = "systemctl command was not found or failed to execute."
-		failedUnitsFinding.Details = []string{fmt.Sprintf("Error: %v", err)}
-
-		failedSnapFinding.Severity = model.SeveritySkipped
-		failedSnapFinding.Title = "Snap mount diagnostics unavailable"
-		failedSnapFinding.Summary = "systemctl command was not found or failed to execute."
-		failedSnapFinding.Details = []string{fmt.Sprintf("Error: %v", err)}
-
-		return []model.Finding{failedUnitsFinding, failedSnapFinding}
-	}
-
-	lines := strings.Split(output, "\n")
-	var services []string
-	var snapMounts []string
-	var mounts []string
-	var timers []string
-	var sockets []string
-	var others []string
-
-	for _, line := range lines {
+	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -58,111 +67,130 @@ func CheckSystemd(runner system.CommandRunner, cfg config.Config) []model.Findin
 		if len(fields) < 4 {
 			continue
 		}
-		// Columns: UNIT LOAD ACTIVE SUB DESCRIPTION
-		if fields[2] == "failed" || fields[3] == "failed" {
-			unitName := fields[0]
-
-			// Check ignores
-			ignored := false
-			for _, iu := range cfg.Systemd.IgnoreUnits {
-				if iu == unitName {
-					ignored = true
-					break
-				}
-			}
-			if !ignored {
-				for _, ip := range cfg.Systemd.IgnoreUnitPatterns {
-					matched, err := path.Match(ip, unitName)
-					if err == nil && matched {
-						ignored = true
-						break
-					}
-				}
-			}
-
-			if ignored {
-				continue
-			}
-
-			// Categorize
-			if strings.HasPrefix(unitName, "snap-") && strings.HasSuffix(unitName, ".mount") {
-				snapMounts = append(snapMounts, unitName)
-			} else if strings.HasSuffix(unitName, ".service") {
-				services = append(services, unitName)
-			} else if strings.HasSuffix(unitName, ".mount") {
-				mounts = append(mounts, unitName)
-			} else if strings.HasSuffix(unitName, ".timer") {
-				timers = append(timers, unitName)
-			} else if strings.HasSuffix(unitName, ".socket") {
-				sockets = append(sockets, unitName)
-			} else {
-				others = append(others, unitName)
-			}
+		if fields[0] == "UNIT" || strings.HasPrefix(fields[0], "●") {
+			continue
 		}
+		if fields[2] != "failed" && fields[3] != "failed" {
+			continue
+		}
+
+		unitName := fields[0]
+		if isIgnoredUnit(unitName, cfg) {
+			continue
+		}
+
+		switch {
+		case strings.HasPrefix(unitName, "snap-") && strings.HasSuffix(unitName, ".mount"):
+			snapMounts = append(snapMounts, unitName)
+		case strings.HasSuffix(unitName, ".service"):
+			services = append(services, unitName)
+		case strings.HasSuffix(unitName, ".mount"):
+			mounts = append(mounts, unitName)
+		case strings.HasSuffix(unitName, ".timer"):
+			timers = append(timers, unitName)
+		case strings.HasSuffix(unitName, ".socket"):
+			sockets = append(sockets, unitName)
+		default:
+			others = append(others, unitName)
+		}
+	}
+	return
+}
+
+// CheckSystemd checks for failed systemd units.
+func CheckSystemd(runner system.CommandRunner, cfg config.Config) []model.Finding {
+	checkCmd := "systemctl --failed --no-pager --plain"
+
+	outputBytes, err := runner.Run("systemctl", "--failed", "--no-pager", "--plain")
+	output := string(outputBytes)
+
+	if err != nil && !strings.Contains(output, "loaded units listed") {
+		return []model.Finding{{
+			ID:           "systemd.unavailable",
+			Severity:     model.SeveritySkipped,
+			Title:        "Systemd diagnostics unavailable",
+			Summary:      "systemctl is unavailable or systemd is not running.",
+			CheckCommand: checkCmd,
+			Details:      []string{fmt.Sprintf("Error: %v", err)},
+		}}
+	}
+
+	services, snapMounts, mounts, timers, sockets, others := parseFailedUnits(output, cfg)
+	importantUnits := cfg.Systemd.ImportantUnits
+	if len(importantUnits) == 0 {
+		importantUnits = defaultImportantUnits
 	}
 
 	var findings []model.Finding
 
-	// 1. services & standard units finding
-	totalFailedUnits := len(services) + len(mounts) + len(timers) + len(sockets) + len(others)
-	if totalFailedUnits == 0 {
-		failedUnitsFinding.Severity = model.SeverityOK
-		failedUnitsFinding.Title = "No failed systemd services found"
-		failedUnitsFinding.Summary = "All services and system units are running normally."
-	} else {
-		hasImportantFailure := false
-		for _, s := range services {
-			for _, imp := range cfg.Systemd.ImportantUnits {
-				if imp == s {
-					hasImportantFailure = true
-					break
-				}
-				matched, err := path.Match(imp, s)
-				if err == nil && matched {
-					hasImportantFailure = true
-					break
-				}
-			}
-			if hasImportantFailure {
-				break
-			}
-		}
-
-		if hasImportantFailure {
-			failedUnitsFinding.Severity = model.SeverityCritical
+	var importantFailed []string
+	var normalServices []string
+	for _, s := range services {
+		if isImportantUnit(s, importantUnits) {
+			importantFailed = append(importantFailed, s)
 		} else {
-			failedUnitsFinding.Severity = model.SeverityWarning
+			normalServices = append(normalServices, s)
 		}
-
-		failedUnitsFinding.Title = "Failed systemd services found"
-		failedUnitsFinding.Summary = fmt.Sprintf("%d failed systemd unit(s) detected.", totalFailedUnits)
-		failedUnitsFinding.Suggestion = "Inspect failed services and their logs."
-
-		var details []string
-		details = append(details, formatGroup("Failed services", services, 10)...)
-		details = append(details, formatGroup("Failed mount units", mounts, 10)...)
-		details = append(details, formatGroup("Failed timer units", timers, 10)...)
-		details = append(details, formatGroup("Failed socket units", sockets, 10)...)
-		details = append(details, formatGroup("Failed other units", others, 10)...)
-		failedUnitsFinding.Details = details
 	}
-	findings = append(findings, failedUnitsFinding)
 
-	// 2. snap mount units finding
-	if len(snapMounts) == 0 {
-		failedSnapFinding.Severity = model.SeverityOK
-		failedSnapFinding.Title = "No failed snap mount units found"
-		failedSnapFinding.Summary = "All snap mount points are mounted correctly."
-	} else {
-		failedSnapFinding.Severity = model.SeverityWarning
-		failedSnapFinding.Title = "Failed snap mount units found"
-		failedSnapFinding.Summary = fmt.Sprintf("%d failed snap mount unit(s) detected.", len(snapMounts))
-		failedSnapFinding.Suggestion = "These may be temporary or noisy snap environment issues. Check snapd status if persistent."
-
-		// Limit snap mounts listed in details to 3 examples as requested
-		failedSnapFinding.Details = formatGroup("Failed snap mount units", snapMounts, 3)
+	for _, unit := range importantFailed {
+		findings = append(findings, model.Finding{
+			ID:           "systemd.failed.important",
+			Severity:     model.SeverityCritical,
+			Title:        "Important systemd service failed",
+			Summary:      fmt.Sprintf("%s is in failed state.", unit),
+			Suggestion:   "Inspect the failed service and its logs.",
+			CheckCommand: fmt.Sprintf("systemctl status %s", unit),
+		})
 	}
-	findings = append(findings, failedSnapFinding)
+
+	if len(normalServices) > 0 {
+		findings = append(findings, model.Finding{
+			ID:           "systemd.failed.services",
+			Severity:     model.SeverityWarning,
+			Title:        "Failed systemd services detected",
+			Summary:      fmt.Sprintf("%d failed service unit(s) detected.", len(normalServices)),
+			Suggestion:   "Inspect the failed services and their logs.",
+			CheckCommand: checkCmd,
+			Details:      formatGroup("Examples", normalServices, 3),
+		})
+	}
+
+	if len(snapMounts) > 0 {
+		findings = append(findings, model.Finding{
+			ID:           "systemd.failed.snap_mounts",
+			Severity:     model.SeverityWarning,
+			Title:        "Snap mount failures detected",
+			Summary:      fmt.Sprintf("%d failed Snap mount unit(s) detected.", len(snapMounts)),
+			Suggestion:   "These are often stale Snap mount units after package updates. Inspect before ignoring.",
+			CheckCommand: "systemctl --failed --type=mount --no-pager",
+			Details:      formatGroup("Examples", snapMounts, 2),
+		})
+	}
+
+	otherUnits := append(append(append(mounts, timers...), sockets...), others...)
+	if len(otherUnits) > 0 {
+		findings = append(findings, model.Finding{
+			ID:           "systemd.failed.other",
+			Severity:     model.SeverityWarning,
+			Title:        "Other failed systemd units detected",
+			Summary:      fmt.Sprintf("%d failed non-service unit(s) detected.", len(otherUnits)),
+			Suggestion:   "Inspect the failed units and their logs.",
+			CheckCommand: checkCmd,
+			Details:      formatGroup("Examples", otherUnits, 3),
+		})
+	}
+
+	totalFailures := len(services) + len(snapMounts) + len(mounts) + len(timers) + len(sockets) + len(others)
+	if totalFailures == 0 {
+		findings = append(findings, model.Finding{
+			ID:           "systemd.failed.none",
+			Severity:     model.SeverityOK,
+			Title:        "No failed systemd units found",
+			Summary:      "All systemd units are running normally.",
+			CheckCommand: checkCmd,
+		})
+	}
 
 	return findings
 }

@@ -49,36 +49,67 @@ func TestDoctorRun(t *testing.T) {
 
 	findings := doc.Run()
 
-	expectedIDs := map[string]bool{
-		"disk.root.usage":            false,
-		"logs.varlog.size":           false,
-		"systemd.failed_units":       false,
-		"systemd.failed_snap_mounts": false,
-		"kernel.errors.current_boot": false,
-		"memory.available":           false,
+	requiredIDs := []string{
+		"disk.root.usage",
+		"logs.varlog.size",
+		"systemd.failed.none",
+		"kernel.errors.none",
+		"memory.ok",
 	}
 
-	if len(findings) != len(expectedIDs) {
-		t.Errorf("expected %d findings, got %d", len(expectedIDs), len(findings))
+	if len(findings) < len(requiredIDs) {
+		t.Errorf("expected at least %d findings, got %d", len(requiredIDs), len(findings))
 	}
 
+	found := make(map[string]bool)
 	for _, f := range findings {
-		if _, ok := expectedIDs[f.ID]; ok {
-			expectedIDs[f.ID] = true
-		} else {
-			t.Errorf("unexpected finding ID: %s", f.ID)
-		}
+		found[f.ID] = true
 	}
-
-	for id, found := range expectedIDs {
-		if !found {
+	for _, id := range requiredIDs {
+		if !found[id] {
 			t.Errorf("expected finding ID %s was not returned", id)
 		}
 	}
 }
 
+func TestExitCode(t *testing.T) {
+	t.Run("exit code 2 for critical", func(t *testing.T) {
+		code := ExitCode([]model.Finding{{Severity: model.SeverityCritical}})
+		if code != 2 {
+			t.Errorf("expected exit code 2, got %d", code)
+		}
+	})
+
+	t.Run("exit code 1 for warning", func(t *testing.T) {
+		code := ExitCode([]model.Finding{{Severity: model.SeverityWarning}})
+		if code != 1 {
+			t.Errorf("expected exit code 1, got %d", code)
+		}
+	})
+
+	t.Run("exit code 0 for only ok/skipped/info", func(t *testing.T) {
+		code := ExitCode([]model.Finding{
+			{Severity: model.SeverityOK},
+			{Severity: model.SeveritySkipped},
+			{Severity: model.SeverityInfo},
+		})
+		if code != 0 {
+			t.Errorf("expected exit code 0, got %d", code)
+		}
+	})
+
+	t.Run("critical beats warning", func(t *testing.T) {
+		code := ExitCode([]model.Finding{
+			{Severity: model.SeverityWarning},
+			{Severity: model.SeverityCritical},
+		})
+		if code != 2 {
+			t.Errorf("expected exit code 2, got %d", code)
+		}
+	})
+}
+
 func TestLoadConfig(t *testing.T) {
-	// 1. defaults load
 	t.Run("defaults load when no file exists", func(t *testing.T) {
 		fsMock := system.FakeFileSystem{
 			ReadFileFunc: func(path string) ([]byte, error) {
@@ -90,22 +121,29 @@ func TestLoadConfig(t *testing.T) {
 		if len(findings) != 0 {
 			t.Errorf("expected no config findings, got %d", len(findings))
 		}
-		if loadedCfg.Disk.RootWarningPercent != 85 {
-			t.Errorf("expected default root warning percent 85, got %d", loadedCfg.Disk.RootWarningPercent)
+		if loadedCfg.Disk.WarningPercent != 90 {
+			t.Errorf("expected default disk warning percent 90, got %d", loadedCfg.Disk.WarningPercent)
+		}
+		if loadedCfg.Disk.CriticalPercent != 97 {
+			t.Errorf("expected default disk critical percent 97, got %d", loadedCfg.Disk.CriticalPercent)
 		}
 	})
 
-	// 2. user config overrides defaults
-	t.Run("user config overrides defaults", func(t *testing.T) {
+	t.Run("custom thresholds load", func(t *testing.T) {
 		fsMock := system.FakeFileSystem{
 			ReadFileFunc: func(path string) ([]byte, error) {
-				// Supplying custom warning percent for disk and ignore units for systemd
 				return []byte(`{
 					"disk": {
-						"root_warning_percent": 90
+						"warning_percent": 80,
+						"critical_percent": 95
 					},
-					"systemd": {
-						"ignore_units": ["cups.service"]
+					"logs": {
+						"warning_mb": 512,
+						"critical_mb": 2048
+					},
+					"memory": {
+						"warning_available_percent": 20,
+						"critical_available_percent": 8
 					}
 				}`), nil
 			},
@@ -115,19 +153,18 @@ func TestLoadConfig(t *testing.T) {
 		if len(findings) != 0 {
 			t.Errorf("expected no config findings, got %d", len(findings))
 		}
-		if loadedCfg.Disk.RootWarningPercent != 90 {
-			t.Errorf("expected overridden disk root warning percent 90, got %d", loadedCfg.Disk.RootWarningPercent)
+		if loadedCfg.Disk.WarningPercent != 80 {
+			t.Errorf("expected disk warning percent 80, got %d", loadedCfg.Disk.WarningPercent)
 		}
-		if loadedCfg.Disk.RootCriticalPercent != 95 {
-			t.Errorf("expected default disk root critical percent 95 to remain, got %d", loadedCfg.Disk.RootCriticalPercent)
+		if loadedCfg.Logs.WarningMB != 512 {
+			t.Errorf("expected logs warning_mb 512, got %d", loadedCfg.Logs.WarningMB)
 		}
-		if len(loadedCfg.Systemd.IgnoreUnits) != 1 || loadedCfg.Systemd.IgnoreUnits[0] != "cups.service" {
-			t.Errorf("expected systemd ignore_units overridden, got %v", loadedCfg.Systemd.IgnoreUnits)
+		if loadedCfg.Memory.WarningAvailablePercent != 20 {
+			t.Errorf("expected memory warning_available_percent 20, got %d", loadedCfg.Memory.WarningAvailablePercent)
 		}
 	})
 
-	// 3. invalid config handled cleanly
-	t.Run("invalid config handled cleanly", func(t *testing.T) {
+	t.Run("invalid config handled safely", func(t *testing.T) {
 		fsMock := system.FakeFileSystem{
 			ReadFileFunc: func(path string) ([]byte, error) {
 				return []byte(`{invalid-json}`), nil
@@ -141,8 +178,28 @@ func TestLoadConfig(t *testing.T) {
 		if findings[0].Severity != model.SeverityWarning {
 			t.Errorf("expected warning severity, got %v", findings[0].Severity)
 		}
-		if loadedCfg.Disk.RootWarningPercent != 85 {
-			t.Errorf("expected default fallback config on load error, got %d", loadedCfg.Disk.RootWarningPercent)
+		if loadedCfg.Disk.WarningPercent != 90 {
+			t.Errorf("expected default fallback config on load error, got %d", loadedCfg.Disk.WarningPercent)
+		}
+	})
+
+	t.Run("invalid regex handled safely", func(t *testing.T) {
+		fsMock := system.FakeFileSystem{
+			ReadFileFunc: func(path string) ([]byte, error) {
+				return []byte(`{
+					"kernel": {
+						"ignore_patterns": ["[bad"]
+					}
+				}`), nil
+			},
+		}
+
+		_, findings := LoadConfig(fsMock)
+		if len(findings) != 1 {
+			t.Errorf("expected 1 finding for invalid regex, got %d", len(findings))
+		}
+		if findings[0].Severity != model.SeverityWarning {
+			t.Errorf("expected warning severity for invalid regex, got %v", findings[0].Severity)
 		}
 	})
 }

@@ -37,8 +37,8 @@ func TestCheckDisk(t *testing.T) {
 			StatfsFunc: func(path string) (system.FsInfo, error) {
 				return system.FsInfo{
 					Blocks: 100,
-					Bfree:  15,
-					Bavail: 15,
+					Bfree:  10,
+					Bavail: 10,
 				}, nil
 			},
 		}
@@ -54,8 +54,8 @@ func TestCheckDisk(t *testing.T) {
 			StatfsFunc: func(path string) (system.FsInfo, error) {
 				return system.FsInfo{
 					Blocks: 100,
-					Bfree:  4,
-					Bavail: 4,
+					Bfree:  3,
+					Bavail: 3,
 				}, nil
 			},
 		}

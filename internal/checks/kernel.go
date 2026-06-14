@@ -13,94 +13,107 @@ import (
 var criticalPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)I/O error`),
 	regexp.MustCompile(`(?i)Buffer I/O error`),
-	regexp.MustCompile(`(?i)blk_update_request`),
 	regexp.MustCompile(`(?i)EXT4-fs error`),
-	regexp.MustCompile(`(?i)XFS.*corruption`),
+	regexp.MustCompile(`(?i)XFS.*error`),
 	regexp.MustCompile(`(?i)BTRFS.*error`),
 	regexp.MustCompile(`(?i)nvme.*timeout`),
-	regexp.MustCompile(`(?i)nvme.*I/O`),
-	regexp.MustCompile(`(?i)ata.*failed command`),
+	regexp.MustCompile(`(?i)ata.*error`),
 	regexp.MustCompile(`(?i)filesystem.*read-only`),
-	regexp.MustCompile(`(?i)Remounting filesystem read-only`),
-	regexp.MustCompile(`(?i)end_request: I/O error`),
 	regexp.MustCompile(`(?i)Out of memory`),
 	regexp.MustCompile(`(?i)oom-killer`),
-	regexp.MustCompile(`(?i)watchdog: BUG: soft lockup`),
-	regexp.MustCompile(`(?i)watchdog: Watchdog detected hard LOCKUP`),
 	regexp.MustCompile(`(?i)kernel panic`),
-	regexp.MustCompile(`(?i)BUG: unable to handle kernel`),
-	regexp.MustCompile(`(?i)Machine check events logged`),
-	regexp.MustCompile(`(?i)mce: Hardware Error`),
+	regexp.MustCompile(`(?i)BUG:`),
+	regexp.MustCompile(`(?i)soft lockup`),
+	regexp.MustCompile(`(?i)hard lockup`),
+	regexp.MustCompile(`(?i)watchdog.*lockup`),
 }
 
 var warningPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)ACPI Error`),
 	regexp.MustCompile(`(?i)ACPI BIOS Error`),
-	regexp.MustCompile(`(?i)Bluetooth.*firmware`),
-	regexp.MustCompile(`(?i)USB.*descriptor.*error`),
-	regexp.MustCompile(`(?i)usb.*device descriptor read`),
-	regexp.MustCompile(`(?i)firmware.*failed`),
-	regexp.MustCompile(`(?i)GPU.*firmware`),
-	regexp.MustCompile(`(?i)amdgpu.*error`),
-	regexp.MustCompile(`(?i)i915.*error`),
-	regexp.MustCompile(`(?i)nouveau.*error`),
+	regexp.MustCompile(`(?i)snap.*Can't lookup blockdev`),
+	regexp.MustCompile(`(?i)blockdev.*snap`),
 	regexp.MustCompile(`(?i)Can't lookup blockdev`),
-	regexp.MustCompile(`(?i)snapd.*Can't lookup blockdev`),
 }
 
-func compilePatterns(patterns []string) []*regexp.Regexp {
-	var regexps []*regexp.Regexp
+type compiledPatterns struct {
+	valid   []*regexp.Regexp
+	invalid []string
+}
+
+func compilePatterns(name string, patterns []string) compiledPatterns {
+	var result compiledPatterns
 	for _, p := range patterns {
 		re, err := regexp.Compile("(?i)" + p)
-		if err == nil {
-			regexps = append(regexps, re)
-		} else {
-			re, err = regexp.Compile("(?i)" + regexp.QuoteMeta(p))
-			if err == nil {
-				regexps = append(regexps, re)
-			}
+		if err != nil {
+			result.invalid = append(result.invalid, fmt.Sprintf("%s ignore pattern %q is invalid: %v", name, p, err))
+			continue
 		}
+		result.valid = append(result.valid, re)
 	}
-	return regexps
+	return result
+}
+
+func isRestrictedKernelOutput(output string, err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(output + " " + err.Error())
+	return strings.Contains(lower, "permission") ||
+		strings.Contains(lower, "access denied") ||
+		strings.Contains(lower, "not permitted") ||
+		strings.Contains(lower, "insufficient privileges")
+}
+
+func truncateLine(line string, maxLen int) string {
+	if len(line) <= maxLen {
+		return line
+	}
+	return line[:maxLen] + "..."
 }
 
 // CheckKernel checks for kernel errors in the current boot.
 func CheckKernel(runner system.CommandRunner, cfg config.Config) model.Finding {
-	finding := model.Finding{
-		ID:           "kernel.errors.current_boot",
-		Title:        "Kernel errors check",
-		CheckCommand: "journalctl -k -p 3 -b --no-pager",
-	}
+	checkCmd := "journalctl -k -p 3 -b --no-pager"
 
 	outputBytes, err := runner.Run("journalctl", "-k", "-p", "3", "-b", "--no-pager")
+	output := string(outputBytes)
+
 	if err != nil {
-		finding.Severity = model.SeveritySkipped
-		finding.Title = "Kernel error check skipped"
-		finding.Summary = "Kernel journal could not be read."
-		finding.Details = []string{fmt.Sprintf("Error: %v", err)}
-		return finding
+		if isRestrictedKernelOutput(output, err) {
+			return model.Finding{
+				ID:           "kernel.restricted",
+				Severity:     model.SeveritySkipped,
+				Title:        "Kernel log check restricted",
+				Summary:      "Kernel journal access is restricted for the current user.",
+				CheckCommand: checkCmd,
+				Details:      []string{fmt.Sprintf("Error: %v", err)},
+			}
+		}
+		return model.Finding{
+			ID:           "kernel.unavailable",
+			Severity:     model.SeveritySkipped,
+			Title:        "Kernel log check unavailable",
+			Summary:      "journalctl is unavailable or could not read kernel logs.",
+			CheckCommand: checkCmd,
+			Details:      []string{fmt.Sprintf("Error: %v", err)},
+		}
 	}
 
-	output := string(outputBytes)
-	rawLines := strings.Split(output, "\n")
-
-	ignoreRegexps := compilePatterns(cfg.Kernel.IgnorePatterns)
-	downgradeRegexps := compilePatterns(cfg.Kernel.DowngradePatterns)
+	ignoreCompiled := compilePatterns("kernel", cfg.Kernel.IgnorePatterns)
+	downgradeCompiled := compilePatterns("kernel downgrade", cfg.Kernel.DowngradePatterns)
 
 	var criticalLines []string
 	var warningLines []string
-	var unknownLines []string
-	var totalLines int
 
-	for _, line := range rawLines {
+	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
 
-		// 1. Check if line matches any ignored pattern
 		ignored := false
-		for _, re := range ignoreRegexps {
+		for _, re := range ignoreCompiled.valid {
 			if re.MatchString(trimmed) {
 				ignored = true
 				break
@@ -110,9 +123,6 @@ func CheckKernel(runner system.CommandRunner, cfg config.Config) model.Finding {
 			continue
 		}
 
-		totalLines++
-
-		// 2. Check critical pattern matches
 		isCritical := false
 		for _, re := range criticalPatterns {
 			if re.MatchString(trimmed) {
@@ -122,9 +132,8 @@ func CheckKernel(runner system.CommandRunner, cfg config.Config) model.Finding {
 		}
 
 		if isCritical {
-			// Check if downgraded
 			downgraded := false
-			for _, re := range downgradeRegexps {
+			for _, re := range downgradeCompiled.valid {
 				if re.MatchString(trimmed) {
 					downgraded = true
 					break
@@ -138,7 +147,6 @@ func CheckKernel(runner system.CommandRunner, cfg config.Config) model.Finding {
 			continue
 		}
 
-		// 3. Check warning pattern matches
 		isWarning := false
 		for _, re := range warningPatterns {
 			if re.MatchString(trimmed) {
@@ -146,75 +154,95 @@ func CheckKernel(runner system.CommandRunner, cfg config.Config) model.Finding {
 				break
 			}
 		}
-
 		if isWarning {
 			warningLines = append(warningLines, trimmed)
-		} else {
-			unknownLines = append(unknownLines, trimmed)
 		}
 	}
 
-	if totalLines == 0 {
-		finding.Severity = model.SeverityOK
-		finding.Title = "No kernel errors found in current boot"
-		finding.Summary = "No kernel priority-3 errors were found in this boot."
+	if len(criticalLines) == 0 && len(warningLines) == 0 {
+		finding := model.Finding{
+			ID:           "kernel.errors.none",
+			Severity:     model.SeverityOK,
+			Title:        "No kernel errors found in current boot",
+			Summary:      "No relevant kernel priority-3 messages were found in this boot.",
+			CheckCommand: checkCmd,
+		}
+		if len(ignoreCompiled.invalid) > 0 || len(downgradeCompiled.invalid) > 0 {
+			finding.Details = append(ignoreCompiled.invalid, downgradeCompiled.invalid...)
+		}
 		return finding
 	}
 
-	// Determine severity based on logic
+	var finding model.Finding
+	finding.CheckCommand = checkCmd
+
 	if len(criticalLines) > 0 {
+		finding.ID = "kernel.errors.critical"
 		finding.Severity = model.SeverityCritical
-	} else if len(warningLines) > 0 {
-		finding.Severity = model.SeverityWarning
-	} else if totalLines > cfg.Kernel.UnknownErrorWarningCount {
-		finding.Severity = model.SeverityWarning
+		finding.Title = "Critical kernel errors found in current boot"
+		finding.Summary = fmt.Sprintf("%d critical kernel message(s) found.", len(criticalLines))
+		finding.Suggestion = "Inspect kernel logs for disk, filesystem, or hardware problems."
+		finding.Details = appendExampleLines("Critical examples", criticalLines, 3)
 	} else {
-		finding.Severity = model.SeverityInfo
+		finding.ID = "kernel.errors.warning"
+		finding.Severity = model.SeverityWarning
+		finding.Title = "Kernel warnings found in current boot"
+		finding.Summary = fmt.Sprintf("%d warning-like kernel message(s) found.", len(warningLines))
+		finding.Suggestion = "Inspect kernel logs if you are seeing hardware, driver, boot, or Snap issues."
+		finding.Details = appendExampleLines("Warning examples", warningLines, 3)
 	}
 
-	finding.Title = "Kernel errors found in current boot"
-	finding.Summary = fmt.Sprintf("%d kernel error lines found in this boot.", totalLines)
-	finding.Suggestion = "Inspect kernel errors for disk, driver, filesystem, or hardware problems."
-
-	// Format details
-	var details []string
-	details = append(details, fmt.Sprintf("Total kernel error lines: %d", totalLines))
-	details = append(details, fmt.Sprintf("Critical matches: %d", len(criticalLines)))
-	details = append(details, fmt.Sprintf("Warning matches: %d", len(warningLines)))
-
-	if len(criticalLines) > 0 {
-		details = append(details, "Critical examples:")
-		limit := 5
-		if len(criticalLines) < limit {
-			limit = len(criticalLines)
-		}
-		for i := 0; i < limit; i++ {
-			details = append(details, fmt.Sprintf("  - %s", criticalLines[i]))
-		}
+	if len(ignoreCompiled.invalid) > 0 || len(downgradeCompiled.invalid) > 0 {
+		finding.Details = append(finding.Details, ignoreCompiled.invalid...)
+		finding.Details = append(finding.Details, downgradeCompiled.invalid...)
 	}
 
-	if len(warningLines) > 0 {
-		details = append(details, "Warning examples:")
-		limit := 5
-		if len(warningLines) < limit {
-			limit = len(warningLines)
-		}
-		for i := 0; i < limit; i++ {
-			details = append(details, fmt.Sprintf("  - %s", warningLines[i]))
-		}
-	}
-
-	if len(unknownLines) > 0 {
-		details = append(details, "Unknown examples:")
-		limit := 5
-		if len(unknownLines) < limit {
-			limit = len(unknownLines)
-		}
-		for i := 0; i < limit; i++ {
-			details = append(details, fmt.Sprintf("  - %s", unknownLines[i]))
-		}
-	}
-
-	finding.Details = details
 	return finding
+}
+
+func appendExampleLines(header string, lines []string, limit int) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	var details []string
+	details = append(details, header+":")
+	if len(lines) <= limit {
+		for _, line := range lines {
+			details = append(details, "  - "+truncateLine(line, 120))
+		}
+	} else {
+		for i := 0; i < limit; i++ {
+			details = append(details, "  - "+truncateLine(lines[i], 120))
+		}
+		details = append(details, fmt.Sprintf("  - ... and %d more", len(lines)-limit))
+	}
+	return details
+}
+
+// ValidateKernelPatterns returns findings for invalid config regex patterns.
+func ValidateKernelPatterns(cfg config.Config) []model.Finding {
+	var findings []model.Finding
+	for _, p := range cfg.Kernel.IgnorePatterns {
+		if _, err := regexp.Compile("(?i)" + p); err != nil {
+			findings = append(findings, model.Finding{
+				ID:       "config.kernel.ignore_pattern",
+				Severity: model.SeverityWarning,
+				Title:    "Invalid kernel ignore pattern in config",
+				Summary:  fmt.Sprintf("Pattern %q could not be compiled.", p),
+				Details:  []string{err.Error()},
+			})
+		}
+	}
+	for _, p := range cfg.Kernel.DowngradePatterns {
+		if _, err := regexp.Compile("(?i)" + p); err != nil {
+			findings = append(findings, model.Finding{
+				ID:       "config.kernel.downgrade_pattern",
+				Severity: model.SeverityWarning,
+				Title:    "Invalid kernel downgrade pattern in config",
+				Summary:  fmt.Sprintf("Pattern %q could not be compiled.", p),
+				Details:  []string{err.Error()},
+			})
+		}
+	}
+	return findings
 }

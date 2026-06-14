@@ -15,8 +15,7 @@ import (
 func TestCheckLogs(t *testing.T) {
 	cfg := config.DefaultConfig()
 
-	// 1. small logs -> ok
-	t.Run("small logs -> ok", func(t *testing.T) {
+	t.Run("normal log usage", func(t *testing.T) {
 		fsMock := system.FakeFileSystem{
 			StatFunc: func(path string) (os.FileInfo, error) {
 				return system.FakeFileInfo{NameVal: "log", IsDirVal: true}, nil
@@ -35,14 +34,12 @@ func TestCheckLogs(t *testing.T) {
 		}
 	})
 
-	// 2. warning threshold -> warning (using actual size)
-	t.Run("warning threshold -> warning", func(t *testing.T) {
+	t.Run("warning actual disk usage", func(t *testing.T) {
 		fsMock := system.FakeFileSystem{
 			StatFunc: func(path string) (os.FileInfo, error) {
 				return system.FakeFileInfo{NameVal: "log", IsDirVal: true}, nil
 			},
 			WalkDirFunc: func(root string, fn fs.WalkDirFunc) error {
-				// 1.5 GB actual size is >= 1024 MB warning threshold
 				_ = fn("/var/log/syslog", system.FakeDirEntry{
 					NameVal: "syslog",
 					InfoVal: system.FakeFileInfo{NameVal: "syslog", SizeVal: 1500 * 1024 * 1024, ActualSizeVal: 1500 * 1024 * 1024, IsDirVal: false},
@@ -59,14 +56,12 @@ func TestCheckLogs(t *testing.T) {
 		}
 	})
 
-	// 3. critical threshold -> critical
-	t.Run("critical threshold -> critical", func(t *testing.T) {
+	t.Run("critical actual disk usage", func(t *testing.T) {
 		fsMock := system.FakeFileSystem{
 			StatFunc: func(path string) (os.FileInfo, error) {
 				return system.FakeFileInfo{NameVal: "log", IsDirVal: true}, nil
 			},
 			WalkDirFunc: func(root string, fn fs.WalkDirFunc) error {
-				// 6 GB is >= 5120 MB critical threshold
 				_ = fn("/var/log/syslog", system.FakeDirEntry{
 					NameVal: "syslog",
 					InfoVal: system.FakeFileInfo{NameVal: "syslog", SizeVal: 6 * 1024 * 1024 * 1024, ActualSizeVal: 6 * 1024 * 1024 * 1024, IsDirVal: false},
@@ -80,8 +75,7 @@ func TestCheckLogs(t *testing.T) {
 		}
 	})
 
-	// 4. inaccessible /var/log -> skipped
-	t.Run("inaccessible /var/log -> skipped", func(t *testing.T) {
+	t.Run("missing /var/log handled gracefully", func(t *testing.T) {
 		fsMock := system.FakeFileSystem{
 			StatFunc: func(path string) (os.FileInfo, error) {
 				return nil, errors.New("permission denied")
@@ -93,8 +87,7 @@ func TestCheckLogs(t *testing.T) {
 		}
 	})
 
-	// 5. largest files included
-	t.Run("largest files included", func(t *testing.T) {
+	t.Run("largest files formatting", func(t *testing.T) {
 		fsMock := system.FakeFileSystem{
 			StatFunc: func(path string) (os.FileInfo, error) {
 				return system.FakeFileInfo{NameVal: "log", IsDirVal: true}, nil
@@ -114,10 +107,10 @@ func TestCheckLogs(t *testing.T) {
 		finding := CheckLogs(fsMock, cfg)
 		var hasSyslog, hasNginx bool
 		for _, detail := range finding.Details {
-			if strings.Contains(detail, "/var/log/syslog:") && strings.Contains(detail, "100.00 MB") {
+			if strings.Contains(detail, "/var/log/syslog: 100.00 MB") {
 				hasSyslog = true
 			}
-			if strings.Contains(detail, "/var/log/nginx/access.log:") && strings.Contains(detail, "50.00 MB") {
+			if strings.Contains(detail, "/var/log/nginx/access.log: 50.00 MB") {
 				hasNginx = true
 			}
 		}
@@ -126,8 +119,7 @@ func TestCheckLogs(t *testing.T) {
 		}
 	})
 
-	// 6. largest directories included
-	t.Run("largest directories included", func(t *testing.T) {
+	t.Run("largest directories formatting", func(t *testing.T) {
 		fsMock := system.FakeFileSystem{
 			StatFunc: func(path string) (os.FileInfo, error) {
 				return system.FakeFileInfo{NameVal: "log", IsDirVal: true}, nil
@@ -159,8 +151,7 @@ func TestCheckLogs(t *testing.T) {
 		}
 	})
 
-	// 7. sparse file note included if lastlog/btmp/wtmp appears
-	t.Run("sparse file note included if lastlog/btmp/wtmp appears", func(t *testing.T) {
+	t.Run("sparse files detected", func(t *testing.T) {
 		fsMock := system.FakeFileSystem{
 			StatFunc: func(path string) (os.FileInfo, error) {
 				return system.FakeFileInfo{NameVal: "log", IsDirVal: true}, nil
@@ -168,7 +159,7 @@ func TestCheckLogs(t *testing.T) {
 			WalkDirFunc: func(root string, fn fs.WalkDirFunc) error {
 				_ = fn("/var/log/lastlog", system.FakeDirEntry{
 					NameVal: "lastlog",
-					InfoVal: system.FakeFileInfo{NameVal: "lastlog", SizeVal: 500 * 1024 * 1024, IsDirVal: false},
+					InfoVal: system.FakeFileInfo{NameVal: "lastlog", SizeVal: 500 * 1024 * 1024, ActualSizeVal: 1024, IsDirVal: false},
 				}, nil)
 				return nil
 			},
@@ -176,7 +167,7 @@ func TestCheckLogs(t *testing.T) {
 		finding := CheckLogs(fsMock, cfg)
 		var hasSparseNote bool
 		for _, detail := range finding.Details {
-			if strings.Contains(detail, "lastlog, btmp, and wtmp may be sparse or misleading") {
+			if strings.Contains(detail, "/var/log/lastlog appears sparse") {
 				hasSparseNote = true
 			}
 		}
@@ -185,14 +176,12 @@ func TestCheckLogs(t *testing.T) {
 		}
 	})
 
-	// 8. sparse files not causing false critical log-size alerts
-	t.Run("sparse files not causing false critical log-size alerts", func(t *testing.T) {
+	t.Run("sparse files do not cause false warning or critical", func(t *testing.T) {
 		fsMock := system.FakeFileSystem{
 			StatFunc: func(path string) (os.FileInfo, error) {
 				return system.FakeFileInfo{NameVal: "log", IsDirVal: true}, nil
 			},
 			WalkDirFunc: func(root string, fn fs.WalkDirFunc) error {
-				// Apparent size is 6 GB (which exceeds the 5 GB critical threshold), but actual size is 10 MB
 				_ = fn("/var/log/lastlog", system.FakeDirEntry{
 					NameVal: "lastlog",
 					InfoVal: system.FakeFileInfo{NameVal: "lastlog", SizeVal: 6 * 1024 * 1024 * 1024, ActualSizeVal: 10 * 1024 * 1024, IsDirVal: false},
@@ -201,18 +190,27 @@ func TestCheckLogs(t *testing.T) {
 			},
 		}
 		finding := CheckLogs(fsMock, cfg)
-		// Since actual size is 10 MB, it should be OK
 		if finding.Severity != model.SeverityOK {
 			t.Errorf("expected OK severity due to small actual size, got %v", finding.Severity)
 		}
-		var hasApparentText bool
-		for _, detail := range finding.Details {
-			if strings.Contains(detail, "apparent size: 6144.00 MB") {
-				hasApparentText = true
-			}
+	})
+
+	t.Run("permission errors do not crash", func(t *testing.T) {
+		fsMock := system.FakeFileSystem{
+			StatFunc: func(path string) (os.FileInfo, error) {
+				return system.FakeFileInfo{NameVal: "log", IsDirVal: true}, nil
+			},
+			WalkDirFunc: func(root string, fn fs.WalkDirFunc) error {
+				_ = fn("/var/log/syslog", system.FakeDirEntry{
+					NameVal: "syslog",
+					InfoVal: system.FakeFileInfo{NameVal: "syslog", SizeVal: 1024, IsDirVal: false},
+				}, errors.New("permission denied"))
+				return nil
+			},
 		}
-		if !hasApparentText {
-			t.Errorf("expected details to display apparent size of 6144.00 MB")
+		finding := CheckLogs(fsMock, cfg)
+		if finding.Severity != model.SeverityOK {
+			t.Errorf("expected OK when walk errors are skipped, got %v", finding.Severity)
 		}
 	})
 }

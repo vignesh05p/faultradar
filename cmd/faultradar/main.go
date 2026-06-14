@@ -9,7 +9,7 @@ import (
 	"faultradar/internal/system"
 )
 
-const version = "0.2.0"
+const version = "1.0.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -25,7 +25,7 @@ func main() {
 			case "--json":
 				runDoctor(true)
 			case "--help":
-				printDoctorHelp()
+				printHelp()
 				os.Exit(0)
 			default:
 				fmt.Printf("Unknown flag: %s\n\n", os.Args[2])
@@ -45,11 +45,11 @@ func main() {
 			printUsage()
 			os.Exit(1)
 		}
-		fmt.Printf("FaultRadar v%s\n", version)
+		fmt.Printf("faultradar %s\n", version)
 		os.Exit(0)
 
 	case "help", "--help", "-h":
-		printUsage()
+		printHelp()
 		os.Exit(0)
 
 	default:
@@ -91,17 +91,22 @@ func runDoctor(jsonMode bool) {
 }
 
 func printUsage() {
+	fmt.Fprintf(os.Stderr, "Unknown command or invalid usage.\n\n")
+	printHelp()
+}
+
+func printHelp() {
+	fmt.Printf("FaultRadar v%s\n\n", version)
 	fmt.Println("Usage:")
 	fmt.Println("  faultradar doctor [--json]")
 	fmt.Println("  faultradar version")
 	fmt.Println("  faultradar help")
-}
-
-func printDoctorHelp() {
-	fmt.Println("Usage:")
-	fmt.Println("  faultradar doctor [--json]")
+	fmt.Println()
+	fmt.Println("Commands:")
+	fmt.Println("  doctor    Run read-only Linux health checks")
+	fmt.Println("  version   Print version")
+	fmt.Println("  help      Show help")
 	fmt.Println()
 	fmt.Println("Options:")
-	fmt.Println("  --json    Output diagnostic report in machine-readable JSON format")
-	fmt.Println("  --help    Show this help message")
+	fmt.Println("  --json    Print machine-readable JSON for doctor output")
 }

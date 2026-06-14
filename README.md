@@ -1,163 +1,89 @@
 # FaultRadar
 
-FaultRadar is a lightweight, read-only system diagnostic CLI tool for Linux/Ubuntu. It runs checks on disk space, log sizes, failed systemd services, kernel logs, and memory status, providing a clear health report to identify system bottlenecks and failures.
+FaultRadar is a read-only Linux diagnostic CLI. Run one command to see what is obviously wrong with your system and what safe command to run next.
 
 ## What FaultRadar is
-- An early diagnostic CLI to quickly inspect the health of a Linux system.
-- An accurate classifier for kernel errors and systemd failures, reducing noise from non-critical messages (e.g. ACPI BIOS warnings, snap mounts).
-- A safe diagnostic tool that reads system files and runs safe query commands.
+
+- A single-command health check for common Linux desktop problems
+- A structured report of disk, log, systemd, kernel, and memory issues
+- A safe diagnostic tool that reads system files and runs read-only query commands
 
 ## What FaultRadar is NOT
-- It is **not** a production-ready stable public release (it is currently v0.2.0).
-- It is **not** a daemon or a background monitor.
-- It is **not** a system repair or configuration auto-fixing tool.
-- It is **not** a log cleaner or space reclaimer.
 
-## Why it does not auto-fix problems
-FaultRadar adheres strictly to a **read-only diagnostic philosophy**. Automatically fixing system errors (such as deleting massive logs, restarting services, or modifying mount points) can cause unexpected downtime, data corruption, or service failures. Diagnosing the underlying cause and applying deliberate manual actions is safer and prevents repeat issues.
+- Not a daemon or background monitor
+- Not an auto-fix or repair tool
+- Not a log cleaner or space reclaimer
+- Not a replacement for professional monitoring, backups, SMART tooling, or sysadmin judgment
+- Not guaranteed to work on every Linux distribution
 
----
+## Safety guarantee
 
-## Installation & Script Commands
+FaultRadar is **read-only**. It does not delete, truncate, repair, restart, or modify your system. It may suggest safe inspection commands such as `df -h /`, `free -h`, or `systemctl status`.
 
-- **Run Verification Suite (gofmt, vet, test, build)**:
-  ```bash
-  ./scripts/test.sh
-  ```
-- **Install Tool**: Compiles the binary, copies it to `/usr/local/bin`, and places the default config at `~/.config/faultradar/config.json`.
-  ```bash
-  ./scripts/install.sh
-  ```
-- **Uninstall Tool**: Removes the binary. Use `--purge` to also delete configuration files.
-  ```bash
-  ./scripts/uninstall.sh [--purge]
-  ```
-- **Build Release Binaries**: Compiles cross-platform `linux/amd64` and `linux/arm64` release binaries into the `bin/` directory.
-  ```bash
-  ./scripts/build-release.sh
-  ```
+## Install and build
 
----
-
-## Core Diagnostics & Features
-
-### 1. Kernel Error Classification
-Navigates the output of `journalctl -k -p 3 -b --no-pager` and classifies errors:
-- **CRITICAL**: Significant issues (e.g., `I/O error`, `EXT4-fs error`, `OOM killer`, `kernel panic`, hardware/MCE faults).
-- **WARNING**: Milder messages (e.g., `ACPI Error`, `Can't lookup blockdev`, missing non-essential firmware).
-- **INFO**: Low count of unrecognized error lines (below the configured threshold).
-- **OK**: No priority-3 kernel errors detected.
-
-### 2. Systemd Grouping & Snap Noise Handling
-Parses failed units via `systemctl --failed` and separates findings to avoid noisy alerts:
-- **Failed systemd services check**: Reports failures of standard services, timers, and sockets. If an important service (e.g., `mysql`, `postgresql`, `docker`, `ssh`, `NetworkManager`) fails, severity is promoted to **CRITICAL**.
-- **Failed snap mount units check**: Failed snap mounts are grouped and reported separately as **WARNING** unless configuration says otherwise.
-- Human output is formatted to only list a few snap unit examples and a count to keep the output readable.
-
-### 3. Log Analysis
-Walks `/var/log` recursively to calculate actual disk usage and apparent size:
-- Warning and critical thresholds are based on actual disk usage, preventing false alerts on sparse files.
-- Identifies sparse log files (such as `/var/log/lastlog`) and prints a notice to clarify size discrepancies.
-- Reports the top 5 largest directories and top 5 largest files by actual disk usage.
-
----
-
-## Configuration Example
-
-Save this to `~/.config/faultradar/config.json` or `/etc/faultradar/config.json` to customize thresholds:
-
-```json
-{
-  "disk": {
-    "root_warning_percent": 85,
-    "root_critical_percent": 95
-  },
-  "logs": {
-    "varlog_warning_mb": 1024,
-    "varlog_critical_mb": 5120
-  },
-  "kernel": {
-    "unknown_error_warning_count": 10,
-    "ignore_patterns": [
-      "some-noise-pattern"
-    ],
-    "downgrade_patterns": [
-      "some-acpi-issue"
-    ]
-  },
-  "systemd": {
-    "ignore_units": [
-      "bluetooth.service"
-    ],
-    "ignore_unit_patterns": [
-      "snap-*.mount"
-    ],
-    "important_units": [
-      "mysql.service",
-      "postgresql.service",
-      "docker.service",
-      "ssh.service"
-    ]
-  },
-  "memory": {
-    "available_warning_percent": 15,
-    "available_critical_percent": 5
-  }
-}
+```bash
+git clone <repository-url>
+cd faultradar
+./scripts/build.sh
 ```
 
----
+The binary is written to `bin/faultradar`.
 
-## CLI Output Examples
+Optional install to `/usr/local/bin`:
 
-### Human-Readable Output
+```bash
+./scripts/install.sh
+```
+
+## Usage
+
+```bash
+faultradar doctor
+faultradar doctor --json
+faultradar version
+faultradar help
+faultradar doctor --help
+```
+
+Unsupported commands print usage and exit non-zero.
+
+## Example human output
+
 ```text
-FaultRadar v0.2.0
+FaultRadar v1.0.0
 
 WARNING
 
-[1] Large log files detected
-    Total actual log size is 1080.50 MB (threshold: 1024 MB).
+[1] Large log storage detected
+    /var/log uses 1.42 GB on disk.
     Suggestion: Inspect the largest logs and fix the source before deleting or truncating files.
     Check:
-      find /var/log -type f -exec du -sh {} +
+      sudo du -h -d 1 /var/log | sort -h
     Details:
-      Total actual size of /var/log: 1080.50 MB (apparent size: 3941.23 MB)
+      Actual disk usage: 1.42 GB
+      Apparent size: 3.91 GB
       Largest directories:
-        - /var/log/journal: 950.00 MB
-        - /var/log/mongodb: 130.50 MB
+        - /var/log/journal: 920.00 MB
+        - /var/log/mongodb: 275.08 MB
       Largest files:
-        - /var/log/journal/123/system.journal: 950.00 MB
-        - /var/log/lastlog: 0.10 MB (apparent: 2860.73 MB)
-      Note: lastlog, btmp, and wtmp may be sparse or misleading. Use du -h for disk usage.
-
-[2] Failed snap mount units found
-    3 failed snap mount unit(s) detected.
-    Suggestion: These may be temporary or noisy snap environment issues. Check snapd status if persistent.
-    Check:
-      systemctl --failed --no-pager --plain
-    Details:
-      Failed snap mount units:
-        - snap-chromium-3235.mount
-        - snap-chromium-3265.mount
-        - snap-code-215.mount
+        - /var/log/mongodb/mongod.log: 275.08 MB
+      Sparse files detected:
+        - /var/log/lastlog appears sparse; apparent size may be misleading.
 
 OK
 
-[3] Root disk usage looks normal
+[2] Root disk usage looks normal
     Root disk usage is 42%.
     Check:
       df -h /
     Details:
-      Root filesystem is 42% used.
-
-[4] No failed systemd services found
-    All services and system units are running normally.
-    Check:
-      systemctl --failed --no-pager --plain
+      Mount: /
+      Used: 42%
 ```
 
-### JSON Output
+## Example JSON output
+
 ```json
 [
   {
@@ -167,33 +93,60 @@ OK
     "summary": "Root disk usage is 42%.",
     "check_command": "df -h /",
     "details": [
-      "Root filesystem is 42% used."
-    ]
-  },
-  {
-    "id": "logs.varlog.size",
-    "severity": "warning",
-    "title": "Large log files detected",
-    "summary": "Total actual log size is 1080.50 MB (threshold: 1024 MB).",
-    "suggestion": "Inspect the largest logs and fix the source before deleting or truncating files.",
-    "check_command": "find /var/log -type f -exec du -sh {} +",
-    "details": [
-      "Total actual size of /var/log: 1080.50 MB (apparent size: 3941.23 MB)",
-      "Largest directories:",
-      "  - /var/log/journal: 950.00 MB",
-      "  - /var/log/mongodb: 130.50 MB",
-      "Largest files:",
-      "  - /var/log/journal/123/system.journal: 950.00 MB",
-      "  - /var/log/lastlog: 0.10 MB (apparent: 2860.73 MB)"
+      "Mount: /",
+      "Used: 42%"
     ]
   }
 ]
 ```
 
----
+## Checks performed
 
-## Known Limitations
+1. **Root disk usage** — warns at 90% used, critical at 97%
+2. **`/var/log` disk usage** — based on actual allocated blocks, not apparent file size
+3. **Large log files and directories** — top 5 by actual disk usage
+4. **Failed systemd units** — important services, normal services, snap mounts, and other units reported separately
+5. **Kernel errors in current boot** — classified critical vs warning patterns
+6. **Memory and swap health** — low available memory and missing swap
+7. **Skipped or restricted checks** — reported when permissions or tools are unavailable
 
-- **Platform Scope**: Built specifically for system diagnostics on Linux/Ubuntu.
-- **Root Permissions**: Some checks may be restricted for non-root users, especially kernel journal access and protected log files.
-- **Systemd Dependency**: The systemd checks require the `systemctl` CLI tool to be installed and available in the system PATH.
+## Permissions
+
+Some checks may be restricted for non-root users, especially kernel journal access and protected log files. FaultRadar reports restricted checks as skipped or warning instead of crashing.
+
+## Limitations
+
+- Tested primarily on Ubuntu-like Linux systems using systemd
+- Requires `systemctl` and `journalctl` for full coverage; missing tools are reported as skipped
+- Sparse log files (such as `lastlog`) can show misleading apparent sizes; thresholds use actual disk usage
+- Snap mount failures are common noise and are reported separately from important service failures
+- Config regex patterns that fail to compile produce a warning finding, not a crash
+
+## Configuration
+
+Optional config file locations (first found wins):
+
+- `~/.config/faultradar/config.json`
+- `/etc/faultradar/config.json`
+
+See `examples/config.json` for the supported format. Defaults work without any config file.
+
+## Development
+
+```bash
+./scripts/test.sh
+./scripts/build.sh
+./scripts/build-release.sh
+```
+
+`test.sh` runs gofmt, go vet, tests, and build.
+
+## Exit codes
+
+- `0` — only info, skipped, or ok findings
+- `1` — at least one warning, no critical findings
+- `2` — at least one critical finding
+
+## License
+
+See [LICENSE](LICENSE).

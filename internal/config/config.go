@@ -2,19 +2,18 @@ package config
 
 type Config struct {
 	Disk struct {
-		RootWarningPercent  int `json:"root_warning_percent"`
-		RootCriticalPercent int `json:"root_critical_percent"`
+		WarningPercent  int `json:"warning_percent"`
+		CriticalPercent int `json:"critical_percent"`
 	} `json:"disk"`
 
 	Logs struct {
-		VarLogWarningMB  int64 `json:"varlog_warning_mb"`
-		VarLogCriticalMB int64 `json:"varlog_critical_mb"`
+		WarningMB  int64 `json:"warning_mb"`
+		CriticalMB int64 `json:"critical_mb"`
 	} `json:"logs"`
 
 	Kernel struct {
-		UnknownErrorWarningCount int      `json:"unknown_error_warning_count"`
-		DowngradePatterns        []string `json:"downgrade_patterns"`
-		IgnorePatterns           []string `json:"ignore_patterns"`
+		IgnorePatterns    []string `json:"ignore_patterns"`
+		DowngradePatterns []string `json:"downgrade_patterns"`
 	} `json:"kernel"`
 
 	Systemd struct {
@@ -24,21 +23,20 @@ type Config struct {
 	} `json:"systemd"`
 
 	Memory struct {
-		AvailableWarningPercent  int `json:"available_warning_percent"`
-		AvailableCriticalPercent int `json:"available_critical_percent"`
+		WarningAvailablePercent  int `json:"warning_available_percent"`
+		CriticalAvailablePercent int `json:"critical_available_percent"`
 	} `json:"memory"`
 }
 
 // DefaultConfig returns the default configuration for FaultRadar.
 func DefaultConfig() Config {
 	var c Config
-	c.Disk.RootWarningPercent = 85
-	c.Disk.RootCriticalPercent = 95
+	c.Disk.WarningPercent = 90
+	c.Disk.CriticalPercent = 97
 
-	c.Logs.VarLogWarningMB = 1024
-	c.Logs.VarLogCriticalMB = 5120
+	c.Logs.WarningMB = 1024
+	c.Logs.CriticalMB = 5120
 
-	c.Kernel.UnknownErrorWarningCount = 10
 	c.Kernel.IgnorePatterns = []string{}
 	c.Kernel.DowngradePatterns = []string{}
 
@@ -52,11 +50,13 @@ func DefaultConfig() Config {
 		"ssh.service",
 		"sshd.service",
 		"NetworkManager.service",
-		"systemd-resolved.service",
-		"systemd-journald.service",
+		"gdm.service",
+		"sddm.service",
+		"lightdm.service",
+		"display-manager.service",
 	}
 
-	c.Memory.AvailableWarningPercent = 15
-	c.Memory.AvailableCriticalPercent = 5
+	c.Memory.WarningAvailablePercent = 10
+	c.Memory.CriticalAvailablePercent = 5
 	return c
 }

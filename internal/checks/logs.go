@@ -40,20 +40,35 @@ func getVarLogSubdir(path string) string {
 	return filepath.Join(prefix, parts[0])
 }
 
+func formatSize(bytes int64) string {
+	const gb = 1024 * 1024 * 1024
+	const mb = 1024 * 1024
+	if bytes >= gb {
+		return fmt.Sprintf("%.2f GB", float64(bytes)/float64(gb))
+	}
+	return fmt.Sprintf("%.2f MB", float64(bytes)/float64(mb))
+}
+
+func isLikelySparse(apparent, actual int64) bool {
+	if apparent <= 1024*1024 {
+		return false
+	}
+	return apparent >= actual*10 && apparent > actual
+}
+
 // CheckLogs checks the total actual disk size of /var/log recursively.
 func CheckLogs(sysFS system.FileSystem, cfg config.Config) model.Finding {
 	finding := model.Finding{
 		ID:           "logs.varlog.size",
-		Title:        "Log files size check",
-		CheckCommand: "find /var/log -type f -exec du -sh {} +",
+		CheckCommand: "sudo du -h -d 1 /var/log | sort -h",
 	}
 
 	logDir := "/var/log"
 	_, err := sysFS.Stat(logDir)
 	if err != nil {
 		finding.Severity = model.SeveritySkipped
-		finding.Title = "Log files size check skipped"
-		finding.Summary = "Log files size check could not be run."
+		finding.Title = "Log storage check skipped"
+		finding.Summary = "Log storage check could not be run."
 		finding.Details = []string{fmt.Sprintf("Failed to access /var/log: %v", err)}
 		return finding
 	}
@@ -63,12 +78,25 @@ func CheckLogs(sysFS system.FileSystem, cfg config.Config) model.Finding {
 	var files []fileInfo
 	dirSizes := make(map[string]int64)
 	dirActualSizes := make(map[string]int64)
-	var hasSparseLogs bool
+	var sparseFiles []string
+	visited := make(map[string]bool)
 
 	err = sysFS.WalkDir(logDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
 		}
+
+		if d.Type()&fs.ModeSymlink != 0 {
+			target, err := filepath.EvalSymlinks(path)
+			if err == nil {
+				if visited[target] {
+					return fs.SkipDir
+				}
+				visited[target] = true
+			}
+			return nil
+		}
+
 		if !d.Type().IsRegular() {
 			return nil
 		}
@@ -76,11 +104,6 @@ func CheckLogs(sysFS system.FileSystem, cfg config.Config) model.Finding {
 		info, err := d.Info()
 		if err != nil {
 			return nil
-		}
-
-		name := d.Name()
-		if name == "lastlog" || name == "btmp" || name == "wtmp" {
-			hasSparseLogs = true
 		}
 
 		size := info.Size()
@@ -95,23 +118,25 @@ func CheckLogs(sysFS system.FileSystem, cfg config.Config) model.Finding {
 		dirSizes[subdir] += size
 		dirActualSizes[subdir] += actualSize
 
+		if isLikelySparse(size, actualSize) {
+			sparseFiles = append(sparseFiles, path)
+		}
+
 		return nil
 	})
 
 	if err != nil {
 		finding.Severity = model.SeveritySkipped
-		finding.Title = "Log files size check skipped"
-		finding.Summary = "Log files size check could not be run."
+		finding.Title = "Log storage check skipped"
+		finding.Summary = "Log storage check could not be run."
 		finding.Details = []string{fmt.Sprintf("Walk error: %v", err)}
 		return finding
 	}
 
-	// Sort files by actual size descending
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].ActualSize > files[j].ActualSize
 	})
 
-	// Convert directory sizes to slice and sort descending by actual size
 	var dirs []dirInfo
 	for dPath, dSize := range dirActualSizes {
 		dirs = append(dirs, dirInfo{Path: dPath, Size: dirSizes[dPath], ActualSize: dSize})
@@ -120,31 +145,29 @@ func CheckLogs(sysFS system.FileSystem, cfg config.Config) model.Finding {
 		return dirs[i].ActualSize > dirs[j].ActualSize
 	})
 
-	// Check thresholds using actual disk size
-	warningThreshold := cfg.Logs.VarLogWarningMB * 1024 * 1024
-	criticalThreshold := cfg.Logs.VarLogCriticalMB * 1024 * 1024
+	warningThreshold := cfg.Logs.WarningMB * 1024 * 1024
+	criticalThreshold := cfg.Logs.CriticalMB * 1024 * 1024
 
 	if totalActualSize >= criticalThreshold {
 		finding.Severity = model.SeverityCritical
-		finding.Title = "Huge log files detected"
-		finding.Summary = fmt.Sprintf("Total actual log size is %.2f MB (threshold: %d MB).", float64(totalActualSize)/(1024*1024), cfg.Logs.VarLogCriticalMB)
+		finding.Title = "Large log storage detected"
+		finding.Summary = fmt.Sprintf("/var/log uses %s on disk.", formatSize(totalActualSize))
 		finding.Suggestion = "Inspect the largest logs and fix the source before deleting or truncating files."
 	} else if totalActualSize >= warningThreshold {
 		finding.Severity = model.SeverityWarning
-		finding.Title = "Large log files detected"
-		finding.Summary = fmt.Sprintf("Total actual log size is %.2f MB (threshold: %d MB).", float64(totalActualSize)/(1024*1024), cfg.Logs.VarLogWarningMB)
+		finding.Title = "Large log storage detected"
+		finding.Summary = fmt.Sprintf("/var/log uses %s on disk.", formatSize(totalActualSize))
 		finding.Suggestion = "Inspect the largest logs and fix the source before deleting or truncating files."
 	} else {
 		finding.Severity = model.SeverityOK
-		finding.Title = "Log files size looks normal"
-		finding.Summary = fmt.Sprintf("Total actual log size is %.2f MB.", float64(totalActualSize)/(1024*1024))
+		finding.Title = "Log storage looks normal"
+		finding.Summary = fmt.Sprintf("/var/log uses %s on disk.", formatSize(totalActualSize))
 	}
 
-	// Format details
 	var details []string
-	details = append(details, fmt.Sprintf("Total actual size of /var/log: %.2f MB (apparent size: %.2f MB)", float64(totalActualSize)/(1024*1024), float64(totalSize)/(1024*1024)))
+	details = append(details, fmt.Sprintf("Actual disk usage: %s", formatSize(totalActualSize)))
+	details = append(details, fmt.Sprintf("Apparent size: %s", formatSize(totalSize)))
 
-	// Top 5 directories by actual size
 	limitDirs := 5
 	if len(dirs) < limitDirs {
 		limitDirs = len(dirs)
@@ -152,15 +175,10 @@ func CheckLogs(sysFS system.FileSystem, cfg config.Config) model.Finding {
 	if limitDirs > 0 {
 		details = append(details, "Largest directories:")
 		for i := 0; i < limitDirs; i++ {
-			if dirs[i].ActualSize != dirs[i].Size {
-				details = append(details, fmt.Sprintf("  - %s: %.2f MB (apparent: %.2f MB)", dirs[i].Path, float64(dirs[i].ActualSize)/(1024*1024), float64(dirs[i].Size)/(1024*1024)))
-			} else {
-				details = append(details, fmt.Sprintf("  - %s: %.2f MB", dirs[i].Path, float64(dirs[i].ActualSize)/(1024*1024)))
-			}
+			details = append(details, fmt.Sprintf("  - %s: %s", dirs[i].Path, formatSize(dirs[i].ActualSize)))
 		}
 	}
 
-	// Top 5 files by actual size
 	limitFiles := 5
 	if len(files) < limitFiles {
 		limitFiles = len(files)
@@ -168,16 +186,22 @@ func CheckLogs(sysFS system.FileSystem, cfg config.Config) model.Finding {
 	if limitFiles > 0 {
 		details = append(details, "Largest files:")
 		for i := 0; i < limitFiles; i++ {
-			if files[i].ActualSize != files[i].Size {
-				details = append(details, fmt.Sprintf("  - %s: %.2f MB (apparent: %.2f MB)", files[i].Path, float64(files[i].ActualSize)/(1024*1024), float64(files[i].Size)/(1024*1024)))
-			} else {
-				details = append(details, fmt.Sprintf("  - %s: %.2f MB", files[i].Path, float64(files[i].ActualSize)/(1024*1024)))
-			}
+			details = append(details, fmt.Sprintf("  - %s: %s", files[i].Path, formatSize(files[i].ActualSize)))
 		}
 	}
 
-	if hasSparseLogs {
-		details = append(details, "Note: lastlog, btmp, and wtmp may be sparse or misleading. Use du -h for disk usage.")
+	if len(sparseFiles) > 0 {
+		details = append(details, "Sparse files detected:")
+		limit := 5
+		if len(sparseFiles) < limit {
+			limit = len(sparseFiles)
+		}
+		for i := 0; i < limit; i++ {
+			details = append(details, fmt.Sprintf("  - %s appears sparse; apparent size may be misleading.", sparseFiles[i]))
+		}
+		if len(sparseFiles) > limit {
+			details = append(details, fmt.Sprintf("  - ... and %d more", len(sparseFiles)-limit))
+		}
 	}
 
 	finding.Details = details

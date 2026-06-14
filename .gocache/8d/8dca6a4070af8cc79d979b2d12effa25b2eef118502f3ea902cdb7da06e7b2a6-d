@@ -1,0 +1,10 @@
+./disk.go
+./kernel.go
+./logs.go
+./memory.go
+./systemd.go
+./disk_test.go
+./kernel_test.go
+./logs_test.go
+./memory_test.go
+./systemd_test.go
