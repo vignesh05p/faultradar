@@ -4,12 +4,13 @@ import (
 	"errors"
 	"testing"
 
+	"faultradar/internal/config"
 	"faultradar/internal/model"
 	"faultradar/internal/system"
 )
 
 func TestCheckDisk(t *testing.T) {
-	config := model.DefaultConfig()
+	cfg := config.DefaultConfig()
 
 	t.Run("normal usage", func(t *testing.T) {
 		fs := system.FakeFileSystem{
@@ -22,7 +23,7 @@ func TestCheckDisk(t *testing.T) {
 			},
 		}
 
-		finding := CheckDisk(fs, config)
+		finding := CheckDisk(fs, cfg)
 		if finding.Severity != model.SeverityOK {
 			t.Errorf("expected OK severity, got %v", finding.Severity)
 		}
@@ -42,7 +43,7 @@ func TestCheckDisk(t *testing.T) {
 			},
 		}
 
-		finding := CheckDisk(fs, config)
+		finding := CheckDisk(fs, cfg)
 		if finding.Severity != model.SeverityWarning {
 			t.Errorf("expected Warning severity, got %v", finding.Severity)
 		}
@@ -59,7 +60,7 @@ func TestCheckDisk(t *testing.T) {
 			},
 		}
 
-		finding := CheckDisk(fs, config)
+		finding := CheckDisk(fs, cfg)
 		if finding.Severity != model.SeverityCritical {
 			t.Errorf("expected Critical severity, got %v", finding.Severity)
 		}
@@ -72,7 +73,7 @@ func TestCheckDisk(t *testing.T) {
 			},
 		}
 
-		finding := CheckDisk(fs, config)
+		finding := CheckDisk(fs, cfg)
 		if finding.Severity != model.SeveritySkipped {
 			t.Errorf("expected Skipped severity on error, got %v", finding.Severity)
 		}

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"faultradar/internal/config"
 	"faultradar/internal/model"
 	"faultradar/internal/system"
 )
@@ -64,7 +65,7 @@ func compilePatterns(patterns []string) []*regexp.Regexp {
 }
 
 // CheckKernel checks for kernel errors in the current boot.
-func CheckKernel(runner system.CommandRunner, config model.Config) model.Finding {
+func CheckKernel(runner system.CommandRunner, cfg config.Config) model.Finding {
 	finding := model.Finding{
 		ID:           "kernel.errors.current_boot",
 		Title:        "Kernel errors check",
@@ -83,8 +84,8 @@ func CheckKernel(runner system.CommandRunner, config model.Config) model.Finding
 	output := string(outputBytes)
 	rawLines := strings.Split(output, "\n")
 
-	ignoreRegexps := compilePatterns(config.Kernel.IgnorePatterns)
-	downgradeRegexps := compilePatterns(config.Kernel.DowngradePatterns)
+	ignoreRegexps := compilePatterns(cfg.Kernel.IgnorePatterns)
+	downgradeRegexps := compilePatterns(cfg.Kernel.DowngradePatterns)
 
 	var criticalLines []string
 	var warningLines []string
@@ -165,7 +166,7 @@ func CheckKernel(runner system.CommandRunner, config model.Config) model.Finding
 		finding.Severity = model.SeverityCritical
 	} else if len(warningLines) > 0 {
 		finding.Severity = model.SeverityWarning
-	} else if totalLines > config.Kernel.UnknownErrorWarningCount {
+	} else if totalLines > cfg.Kernel.UnknownErrorWarningCount {
 		finding.Severity = model.SeverityWarning
 	} else {
 		finding.Severity = model.SeverityInfo

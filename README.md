@@ -3,11 +3,12 @@
 FaultRadar is a lightweight, read-only system diagnostic CLI tool for Linux/Ubuntu. It runs checks on disk space, log sizes, failed systemd services, kernel logs, and memory status, providing a clear health report to identify system bottlenecks and failures.
 
 ## What FaultRadar is
-- A fast, zero-dependency command line tool to quickly inspect the health of a Linux system.
+- An early diagnostic CLI to quickly inspect the health of a Linux system.
 - An accurate classifier for kernel errors and systemd failures, reducing noise from non-critical messages (e.g. ACPI BIOS warnings, snap mounts).
 - A safe diagnostic tool that reads system files and runs safe query commands.
 
 ## What FaultRadar is NOT
+- It is **not** a production-ready stable public release (it is currently v0.2.0).
 - It is **not** a daemon or a background monitor.
 - It is **not** a system repair or configuration auto-fixing tool.
 - It is **not** a log cleaner or space reclaimer.
@@ -48,16 +49,16 @@ Navigates the output of `journalctl -k -p 3 -b --no-pager` and classifies errors
 - **OK**: No priority-3 kernel errors detected.
 
 ### 2. Systemd Grouping & Snap Noise Handling
-Parses failed units via `systemctl --failed` and groups them into categories: `service`, `mount`, `snap mount`, `timer`, `socket`, and `other`.
-- Filters out non-critical failures like `snap-*.mount` from upgrading severity levels to critical.
-- Promotes failures of **important services** (e.g. `mysql`, `postgresql`, `docker`, `ssh`) to **CRITICAL**.
-- Supports exact ignoring of service names and glob-style ignore patterns (`snap-*.mount`).
+Parses failed units via `systemctl --failed` and separates findings to avoid noisy alerts:
+- **Failed systemd services check**: Reports failures of standard services, timers, and sockets. If an important service (e.g., `mysql`, `postgresql`, `docker`, `ssh`, `NetworkManager`) fails, severity is promoted to **CRITICAL**.
+- **Failed snap mount units check**: Failed snap mounts are grouped and reported separately as **WARNING** unless configuration says otherwise.
+- Human output is formatted to only list a few snap unit examples and a count to keep the output readable.
 
 ### 3. Log Analysis
-Walks `/var/log` recursively to calculate total apparent size and reports:
-- Top 5 largest directories and top 5 largest files.
-- Warnings if sparse log files like `lastlog`, `btmp`, or `wtmp` might misrepresent actual disk space.
-- Configurable warning and critical thresholds (default: warning = 1024 MB, critical = 5120 MB).
+Walks `/var/log` recursively to calculate actual disk usage and apparent size:
+- Warning and critical thresholds are based on actual disk usage, preventing false alerts on sparse files.
+- Identifies sparse log files (such as `/var/log/lastlog`) and prints a notice to clarify size discrepancies.
+- Reports the top 5 largest directories and top 5 largest files by actual disk usage.
 
 ---
 
@@ -111,32 +112,49 @@ Save this to `~/.config/faultradar/config.json` or `/etc/faultradar/config.json`
 
 ### Human-Readable Output
 ```text
-FaultRadar v1.0.0
+FaultRadar v0.2.0
 
 WARNING
 
 [1] Large log files detected
-    Total log size is 3941.23 MB (threshold: 1024 MB).
+    Total actual log size is 1080.50 MB (threshold: 1024 MB).
     Suggestion: Inspect the largest logs and fix the source before deleting or truncating files.
     Check:
       find /var/log -type f -exec du -sh {} +
     Details:
-      Total apparent size of /var/log: 3941.23 MB
+      Total actual size of /var/log: 1080.50 MB (apparent size: 3941.23 MB)
       Largest directories:
-        - /var/log/journal: 3432.00 MB
-        - /var/log/mongodb: 275.08 MB
+        - /var/log/journal: 950.00 MB
+        - /var/log/mongodb: 130.50 MB
       Largest files:
-        - /var/log/mongodb/mongod.log: 275.08 MB
+        - /var/log/journal/123/system.journal: 950.00 MB
+        - /var/log/lastlog: 0.10 MB (apparent: 2860.73 MB)
       Note: lastlog, btmp, and wtmp may be sparse or misleading. Use du -h for disk usage.
+
+[2] Failed snap mount units found
+    3 failed snap mount unit(s) detected.
+    Suggestion: These may be temporary or noisy snap environment issues. Check snapd status if persistent.
+    Check:
+      systemctl --failed --no-pager --plain
+    Details:
+      Failed snap mount units:
+        - snap-chromium-3235.mount
+        - snap-chromium-3265.mount
+        - snap-code-215.mount
 
 OK
 
-[2] Root disk usage looks normal
+[3] Root disk usage looks normal
     Root disk usage is 42%.
     Check:
       df -h /
     Details:
       Root filesystem is 42% used.
+
+[4] No failed systemd services found
+    All services and system units are running normally.
+    Check:
+      systemctl --failed --no-pager --plain
 ```
 
 ### JSON Output
@@ -156,16 +174,17 @@ OK
     "id": "logs.varlog.size",
     "severity": "warning",
     "title": "Large log files detected",
-    "summary": "Total log size is 3941.23 MB (threshold: 1024 MB).",
+    "summary": "Total actual log size is 1080.50 MB (threshold: 1024 MB).",
     "suggestion": "Inspect the largest logs and fix the source before deleting or truncating files.",
     "check_command": "find /var/log -type f -exec du -sh {} +",
     "details": [
-      "Total apparent size of /var/log: 3941.23 MB",
+      "Total actual size of /var/log: 1080.50 MB (apparent size: 3941.23 MB)",
       "Largest directories:",
-      "  - /var/log/journal: 3432.00 MB",
-      "  - /var/log/mongodb: 275.08 MB",
+      "  - /var/log/journal: 950.00 MB",
+      "  - /var/log/mongodb: 130.50 MB",
       "Largest files:",
-      "  - /var/log/mongodb/mongod.log: 275.08 MB"
+      "  - /var/log/journal/123/system.journal: 950.00 MB",
+      "  - /var/log/lastlog: 0.10 MB (apparent: 2860.73 MB)"
     ]
   }
 ]
@@ -175,6 +194,6 @@ OK
 
 ## Known Limitations
 
-- **Sparse File Sizing**: Apparent sizing might report extremely large values for sparse log files (such as `/var/log/lastlog`). A notice is automatically included in reports when sparse logs are present.
-- **Root Permissions**: Running without root permissions might prevent the tool from parsing kernel logs via `journalctl` or walking restricted directories in `/var/log`.
+- **Platform Scope**: Built specifically for system diagnostics on Linux/Ubuntu.
+- **Root Permissions**: Some checks may be restricted for non-root users, especially kernel journal access and protected log files.
 - **Systemd Dependency**: The systemd checks require the `systemctl` CLI tool to be installed and available in the system PATH.

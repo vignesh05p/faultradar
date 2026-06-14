@@ -5,15 +5,22 @@ import (
 	"path"
 	"strings"
 
+	"faultradar/internal/config"
 	"faultradar/internal/model"
 	"faultradar/internal/system"
 )
 
-// CheckSystemd checks for failed systemd units, respecting config ignores.
-func CheckSystemd(runner system.CommandRunner, config model.Config) model.Finding {
-	finding := model.Finding{
+// CheckSystemd checks for failed systemd units, returning separate findings for services/other units and snap mounts.
+func CheckSystemd(runner system.CommandRunner, cfg config.Config) []model.Finding {
+	failedUnitsFinding := model.Finding{
 		ID:           "systemd.failed_units",
 		Title:        "Failed systemd services check",
+		CheckCommand: "systemctl --failed --no-pager --plain",
+	}
+
+	failedSnapFinding := model.Finding{
+		ID:           "systemd.failed_snap_mounts",
+		Title:        "Failed snap mount units check",
 		CheckCommand: "systemctl --failed --no-pager --plain",
 	}
 
@@ -21,11 +28,17 @@ func CheckSystemd(runner system.CommandRunner, config model.Config) model.Findin
 	output := string(outputBytes)
 
 	if err != nil && !strings.Contains(output, "loaded units listed") {
-		finding.Severity = model.SeveritySkipped
-		finding.Title = "Systemd diagnostics unavailable"
-		finding.Summary = "systemctl command was not found or failed to execute."
-		finding.Details = []string{fmt.Sprintf("Error: %v", err)}
-		return finding
+		failedUnitsFinding.Severity = model.SeveritySkipped
+		failedUnitsFinding.Title = "Systemd diagnostics unavailable"
+		failedUnitsFinding.Summary = "systemctl command was not found or failed to execute."
+		failedUnitsFinding.Details = []string{fmt.Sprintf("Error: %v", err)}
+
+		failedSnapFinding.Severity = model.SeveritySkipped
+		failedSnapFinding.Title = "Snap mount diagnostics unavailable"
+		failedSnapFinding.Summary = "systemctl command was not found or failed to execute."
+		failedSnapFinding.Details = []string{fmt.Sprintf("Error: %v", err)}
+
+		return []model.Finding{failedUnitsFinding, failedSnapFinding}
 	}
 
 	lines := strings.Split(output, "\n")
@@ -35,8 +48,6 @@ func CheckSystemd(runner system.CommandRunner, config model.Config) model.Findin
 	var timers []string
 	var sockets []string
 	var others []string
-
-	var totalFailed int
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -53,14 +64,14 @@ func CheckSystemd(runner system.CommandRunner, config model.Config) model.Findin
 
 			// Check ignores
 			ignored := false
-			for _, iu := range config.Systemd.IgnoreUnits {
+			for _, iu := range cfg.Systemd.IgnoreUnits {
 				if iu == unitName {
 					ignored = true
 					break
 				}
 			}
 			if !ignored {
-				for _, ip := range config.Systemd.IgnoreUnitPatterns {
+				for _, ip := range cfg.Systemd.IgnoreUnitPatterns {
 					matched, err := path.Match(ip, unitName)
 					if err == nil && matched {
 						ignored = true
@@ -72,8 +83,6 @@ func CheckSystemd(runner system.CommandRunner, config model.Config) model.Findin
 			if ignored {
 				continue
 			}
-
-			totalFailed++
 
 			// Categorize
 			if strings.HasPrefix(unitName, "snap-") && strings.HasSuffix(unitName, ".mount") {
@@ -92,62 +101,78 @@ func CheckSystemd(runner system.CommandRunner, config model.Config) model.Findin
 		}
 	}
 
-	if totalFailed == 0 {
-		finding.Severity = model.SeverityOK
-		finding.Title = "No failed systemd services found"
-		finding.Summary = "All systemd units are running normally."
-		return finding
-	}
+	var findings []model.Finding
 
-	// Determine if any important services failed
-	hasImportantFailure := false
-	for _, s := range services {
-		for _, imp := range config.Systemd.ImportantUnits {
-			if imp == s {
-				hasImportantFailure = true
-				break
-			}
-			matched, err := path.Match(imp, s)
-			if err == nil && matched {
-				hasImportantFailure = true
-				break
-			}
-		}
-		if hasImportantFailure {
-			break
-		}
-	}
-
-	if hasImportantFailure {
-		finding.Severity = model.SeverityCritical
+	// 1. services & standard units finding
+	totalFailedUnits := len(services) + len(mounts) + len(timers) + len(sockets) + len(others)
+	if totalFailedUnits == 0 {
+		failedUnitsFinding.Severity = model.SeverityOK
+		failedUnitsFinding.Title = "No failed systemd services found"
+		failedUnitsFinding.Summary = "All services and system units are running normally."
 	} else {
-		finding.Severity = model.SeverityWarning
+		hasImportantFailure := false
+		for _, s := range services {
+			for _, imp := range cfg.Systemd.ImportantUnits {
+				if imp == s {
+					hasImportantFailure = true
+					break
+				}
+				matched, err := path.Match(imp, s)
+				if err == nil && matched {
+					hasImportantFailure = true
+					break
+				}
+			}
+			if hasImportantFailure {
+				break
+			}
+		}
+
+		if hasImportantFailure {
+			failedUnitsFinding.Severity = model.SeverityCritical
+		} else {
+			failedUnitsFinding.Severity = model.SeverityWarning
+		}
+
+		failedUnitsFinding.Title = "Failed systemd services found"
+		failedUnitsFinding.Summary = fmt.Sprintf("%d failed systemd unit(s) detected.", totalFailedUnits)
+		failedUnitsFinding.Suggestion = "Inspect failed services and their logs."
+
+		var details []string
+		details = append(details, formatGroup("Failed services", services, 10)...)
+		details = append(details, formatGroup("Failed mount units", mounts, 10)...)
+		details = append(details, formatGroup("Failed timer units", timers, 10)...)
+		details = append(details, formatGroup("Failed socket units", sockets, 10)...)
+		details = append(details, formatGroup("Failed other units", others, 10)...)
+		failedUnitsFinding.Details = details
 	}
+	findings = append(findings, failedUnitsFinding)
 
-	finding.Title = "Failed systemd services found"
-	finding.Summary = fmt.Sprintf("%d failed systemd unit(s) detected.", totalFailed)
-	finding.Suggestion = "Inspect failed services and their logs."
+	// 2. snap mount units finding
+	if len(snapMounts) == 0 {
+		failedSnapFinding.Severity = model.SeverityOK
+		failedSnapFinding.Title = "No failed snap mount units found"
+		failedSnapFinding.Summary = "All snap mount points are mounted correctly."
+	} else {
+		failedSnapFinding.Severity = model.SeverityWarning
+		failedSnapFinding.Title = "Failed snap mount units found"
+		failedSnapFinding.Summary = fmt.Sprintf("%d failed snap mount unit(s) detected.", len(snapMounts))
+		failedSnapFinding.Suggestion = "These may be temporary or noisy snap environment issues. Check snapd status if persistent."
 
-	// Format details
-	var details []string
-	details = append(details, formatGroup("Failed services", services)...)
-	details = append(details, formatGroup("Failed snap mount units", snapMounts)...)
-	details = append(details, formatGroup("Failed mount units", mounts)...)
-	details = append(details, formatGroup("Failed timer units", timers)...)
-	details = append(details, formatGroup("Failed socket units", sockets)...)
-	details = append(details, formatGroup("Failed other units", others)...)
+		// Limit snap mounts listed in details to 3 examples as requested
+		failedSnapFinding.Details = formatGroup("Failed snap mount units", snapMounts, 3)
+	}
+	findings = append(findings, failedSnapFinding)
 
-	finding.Details = details
-	return finding
+	return findings
 }
 
-func formatGroup(groupName string, units []string) []string {
+func formatGroup(groupName string, units []string, limit int) []string {
 	if len(units) == 0 {
 		return nil
 	}
 	var res []string
 	res = append(res, groupName+":")
-	limit := 10
 	if len(units) <= limit {
 		for _, u := range units {
 			res = append(res, "  - "+u)

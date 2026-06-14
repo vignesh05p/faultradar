@@ -6,12 +6,13 @@ import (
 	"os"
 	"testing"
 
+	"faultradar/internal/config"
 	"faultradar/internal/model"
 	"faultradar/internal/system"
 )
 
 func TestDoctorRun(t *testing.T) {
-	config := model.DefaultConfig()
+	cfg := config.DefaultConfig()
 
 	fsMock := system.FakeFileSystem{
 		StatfsFunc: func(path string) (system.FsInfo, error) {
@@ -41,7 +42,7 @@ func TestDoctorRun(t *testing.T) {
 	}
 
 	doc := Doctor{
-		Config: config,
+		Config: cfg,
 		Runner: runnerMock,
 		FS:     fsMock,
 	}
@@ -52,6 +53,7 @@ func TestDoctorRun(t *testing.T) {
 		"disk.root.usage":            false,
 		"logs.varlog.size":           false,
 		"systemd.failed_units":       false,
+		"systemd.failed_snap_mounts": false,
 		"kernel.errors.current_boot": false,
 		"memory.available":           false,
 	}
@@ -84,12 +86,12 @@ func TestLoadConfig(t *testing.T) {
 			},
 		}
 
-		config, findings := LoadConfig(fsMock)
+		loadedCfg, findings := LoadConfig(fsMock)
 		if len(findings) != 0 {
 			t.Errorf("expected no config findings, got %d", len(findings))
 		}
-		if config.Disk.RootWarningPercent != 85 {
-			t.Errorf("expected default root warning percent 85, got %d", config.Disk.RootWarningPercent)
+		if loadedCfg.Disk.RootWarningPercent != 85 {
+			t.Errorf("expected default root warning percent 85, got %d", loadedCfg.Disk.RootWarningPercent)
 		}
 	})
 
@@ -109,18 +111,18 @@ func TestLoadConfig(t *testing.T) {
 			},
 		}
 
-		config, findings := LoadConfig(fsMock)
+		loadedCfg, findings := LoadConfig(fsMock)
 		if len(findings) != 0 {
 			t.Errorf("expected no config findings, got %d", len(findings))
 		}
-		if config.Disk.RootWarningPercent != 90 {
-			t.Errorf("expected overridden disk root warning percent 90, got %d", config.Disk.RootWarningPercent)
+		if loadedCfg.Disk.RootWarningPercent != 90 {
+			t.Errorf("expected overridden disk root warning percent 90, got %d", loadedCfg.Disk.RootWarningPercent)
 		}
-		if config.Disk.RootCriticalPercent != 95 {
-			t.Errorf("expected default disk root critical percent 95 to remain, got %d", config.Disk.RootCriticalPercent)
+		if loadedCfg.Disk.RootCriticalPercent != 95 {
+			t.Errorf("expected default disk root critical percent 95 to remain, got %d", loadedCfg.Disk.RootCriticalPercent)
 		}
-		if len(config.Systemd.IgnoreUnits) != 1 || config.Systemd.IgnoreUnits[0] != "cups.service" {
-			t.Errorf("expected systemd ignore_units overridden, got %v", config.Systemd.IgnoreUnits)
+		if len(loadedCfg.Systemd.IgnoreUnits) != 1 || loadedCfg.Systemd.IgnoreUnits[0] != "cups.service" {
+			t.Errorf("expected systemd ignore_units overridden, got %v", loadedCfg.Systemd.IgnoreUnits)
 		}
 	})
 
@@ -132,15 +134,15 @@ func TestLoadConfig(t *testing.T) {
 			},
 		}
 
-		config, findings := LoadConfig(fsMock)
+		loadedCfg, findings := LoadConfig(fsMock)
 		if len(findings) != 1 {
 			t.Errorf("expected 1 finding for config load error, got %d", len(findings))
 		}
 		if findings[0].Severity != model.SeverityWarning {
 			t.Errorf("expected warning severity, got %v", findings[0].Severity)
 		}
-		if config.Disk.RootWarningPercent != 85 {
-			t.Errorf("expected default fallback config on load error, got %d", config.Disk.RootWarningPercent)
+		if loadedCfg.Disk.RootWarningPercent != 85 {
+			t.Errorf("expected default fallback config on load error, got %d", loadedCfg.Disk.RootWarningPercent)
 		}
 	})
 }

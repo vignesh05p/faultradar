@@ -7,12 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	"faultradar/internal/config"
 	"faultradar/internal/model"
 	"faultradar/internal/system"
 )
 
 func TestCheckLogs(t *testing.T) {
-	config := model.DefaultConfig()
+	cfg := config.DefaultConfig()
 
 	// 1. small logs -> ok
 	t.Run("small logs -> ok", func(t *testing.T) {
@@ -28,28 +29,28 @@ func TestCheckLogs(t *testing.T) {
 				return nil
 			},
 		}
-		finding := CheckLogs(fsMock, config)
+		finding := CheckLogs(fsMock, cfg)
 		if finding.Severity != model.SeverityOK {
 			t.Errorf("expected OK, got %v", finding.Severity)
 		}
 	})
 
-	// 2. warning threshold -> warning
+	// 2. warning threshold -> warning (using actual size)
 	t.Run("warning threshold -> warning", func(t *testing.T) {
 		fsMock := system.FakeFileSystem{
 			StatFunc: func(path string) (os.FileInfo, error) {
 				return system.FakeFileInfo{NameVal: "log", IsDirVal: true}, nil
 			},
 			WalkDirFunc: func(root string, fn fs.WalkDirFunc) error {
-				// 1.5 GB is >= 1024 MB warning threshold
+				// 1.5 GB actual size is >= 1024 MB warning threshold
 				_ = fn("/var/log/syslog", system.FakeDirEntry{
 					NameVal: "syslog",
-					InfoVal: system.FakeFileInfo{NameVal: "syslog", SizeVal: 1500 * 1024 * 1024, IsDirVal: false},
+					InfoVal: system.FakeFileInfo{NameVal: "syslog", SizeVal: 1500 * 1024 * 1024, ActualSizeVal: 1500 * 1024 * 1024, IsDirVal: false},
 				}, nil)
 				return nil
 			},
 		}
-		finding := CheckLogs(fsMock, config)
+		finding := CheckLogs(fsMock, cfg)
 		if finding.Severity != model.SeverityWarning {
 			t.Errorf("expected Warning, got %v", finding.Severity)
 		}
@@ -68,12 +69,12 @@ func TestCheckLogs(t *testing.T) {
 				// 6 GB is >= 5120 MB critical threshold
 				_ = fn("/var/log/syslog", system.FakeDirEntry{
 					NameVal: "syslog",
-					InfoVal: system.FakeFileInfo{NameVal: "syslog", SizeVal: 6 * 1024 * 1024 * 1024, IsDirVal: false},
+					InfoVal: system.FakeFileInfo{NameVal: "syslog", SizeVal: 6 * 1024 * 1024 * 1024, ActualSizeVal: 6 * 1024 * 1024 * 1024, IsDirVal: false},
 				}, nil)
 				return nil
 			},
 		}
-		finding := CheckLogs(fsMock, config)
+		finding := CheckLogs(fsMock, cfg)
 		if finding.Severity != model.SeverityCritical {
 			t.Errorf("expected Critical, got %v", finding.Severity)
 		}
@@ -86,7 +87,7 @@ func TestCheckLogs(t *testing.T) {
 				return nil, errors.New("permission denied")
 			},
 		}
-		finding := CheckLogs(fsMock, config)
+		finding := CheckLogs(fsMock, cfg)
 		if finding.Severity != model.SeveritySkipped {
 			t.Errorf("expected Skipped, got %v", finding.Severity)
 		}
@@ -110,7 +111,7 @@ func TestCheckLogs(t *testing.T) {
 				return nil
 			},
 		}
-		finding := CheckLogs(fsMock, config)
+		finding := CheckLogs(fsMock, cfg)
 		var hasSyslog, hasNginx bool
 		for _, detail := range finding.Details {
 			if strings.Contains(detail, "/var/log/syslog:") && strings.Contains(detail, "100.00 MB") {
@@ -143,7 +144,7 @@ func TestCheckLogs(t *testing.T) {
 				return nil
 			},
 		}
-		finding := CheckLogs(fsMock, config)
+		finding := CheckLogs(fsMock, cfg)
 		var hasJournalDir, hasMongoDir bool
 		for _, detail := range finding.Details {
 			if strings.Contains(detail, "/var/log/journal: 200.00 MB") {
@@ -172,7 +173,7 @@ func TestCheckLogs(t *testing.T) {
 				return nil
 			},
 		}
-		finding := CheckLogs(fsMock, config)
+		finding := CheckLogs(fsMock, cfg)
 		var hasSparseNote bool
 		for _, detail := range finding.Details {
 			if strings.Contains(detail, "lastlog, btmp, and wtmp may be sparse or misleading") {
@@ -181,6 +182,37 @@ func TestCheckLogs(t *testing.T) {
 		}
 		if !hasSparseNote {
 			t.Errorf("expected details to include sparse file notice")
+		}
+	})
+
+	// 8. sparse files not causing false critical log-size alerts
+	t.Run("sparse files not causing false critical log-size alerts", func(t *testing.T) {
+		fsMock := system.FakeFileSystem{
+			StatFunc: func(path string) (os.FileInfo, error) {
+				return system.FakeFileInfo{NameVal: "log", IsDirVal: true}, nil
+			},
+			WalkDirFunc: func(root string, fn fs.WalkDirFunc) error {
+				// Apparent size is 6 GB (which exceeds the 5 GB critical threshold), but actual size is 10 MB
+				_ = fn("/var/log/lastlog", system.FakeDirEntry{
+					NameVal: "lastlog",
+					InfoVal: system.FakeFileInfo{NameVal: "lastlog", SizeVal: 6 * 1024 * 1024 * 1024, ActualSizeVal: 10 * 1024 * 1024, IsDirVal: false},
+				}, nil)
+				return nil
+			},
+		}
+		finding := CheckLogs(fsMock, cfg)
+		// Since actual size is 10 MB, it should be OK
+		if finding.Severity != model.SeverityOK {
+			t.Errorf("expected OK severity due to small actual size, got %v", finding.Severity)
+		}
+		var hasApparentText bool
+		for _, detail := range finding.Details {
+			if strings.Contains(detail, "apparent size: 6144.00 MB") {
+				hasApparentText = true
+			}
+		}
+		if !hasApparentText {
+			t.Errorf("expected details to display apparent size of 6144.00 MB")
 		}
 	})
 }

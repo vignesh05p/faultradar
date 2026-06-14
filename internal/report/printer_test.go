@@ -82,10 +82,10 @@ func TestPrinter(t *testing.T) {
 	// 3. human output groups severity in correct order
 	t.Run("human output groups severity in correct order", func(t *testing.T) {
 		var buf bytes.Buffer
-		PrintHuman(&buf, "1.0.0", findings)
+		PrintHuman(&buf, "0.2.0", findings)
 		out := buf.String()
 
-		if !strings.Contains(out, "FaultRadar v1.0.0") {
+		if !strings.Contains(out, "FaultRadar v0.2.0") {
 			t.Errorf("expected version header")
 		}
 
@@ -107,7 +107,7 @@ func TestPrinter(t *testing.T) {
 	// 4. skipped group appears if skipped finding exists
 	t.Run("skipped group appears if skipped finding exists", func(t *testing.T) {
 		var buf bytes.Buffer
-		PrintHuman(&buf, "1.0.0", findings)
+		PrintHuman(&buf, "0.2.0", findings)
 		out := buf.String()
 
 		if !strings.Contains(out, "SKIPPED") {

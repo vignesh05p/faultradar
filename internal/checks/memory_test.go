@@ -4,12 +4,13 @@ import (
 	"errors"
 	"testing"
 
+	"faultradar/internal/config"
 	"faultradar/internal/model"
 	"faultradar/internal/system"
 )
 
 func TestCheckMemory(t *testing.T) {
-	config := model.DefaultConfig()
+	cfg := config.DefaultConfig()
 
 	t.Run("healthy meminfo", func(t *testing.T) {
 		fsMock := system.FakeFileSystem{
@@ -18,7 +19,7 @@ func TestCheckMemory(t *testing.T) {
 			},
 		}
 
-		finding := CheckMemory(fsMock, config)
+		finding := CheckMemory(fsMock, cfg)
 		if finding.Severity != model.SeverityOK {
 			t.Errorf("expected OK severity, got %v", finding.Severity)
 		}
@@ -31,7 +32,7 @@ func TestCheckMemory(t *testing.T) {
 			},
 		}
 
-		finding := CheckMemory(fsMock, config)
+		finding := CheckMemory(fsMock, cfg)
 		if finding.Severity != model.SeverityWarning {
 			t.Errorf("expected Warning severity, got %v", finding.Severity)
 		}
@@ -44,7 +45,7 @@ func TestCheckMemory(t *testing.T) {
 			},
 		}
 
-		finding := CheckMemory(fsMock, config)
+		finding := CheckMemory(fsMock, cfg)
 		if finding.Severity != model.SeverityCritical {
 			t.Errorf("expected Critical severity, got %v", finding.Severity)
 		}
@@ -57,7 +58,7 @@ func TestCheckMemory(t *testing.T) {
 			},
 		}
 
-		finding := CheckMemory(fsMock, config)
+		finding := CheckMemory(fsMock, cfg)
 		if finding.Severity != model.SeverityWarning {
 			t.Errorf("expected Warning severity on no swap, got %v", finding.Severity)
 		}
@@ -70,7 +71,7 @@ func TestCheckMemory(t *testing.T) {
 			},
 		}
 
-		finding := CheckMemory(fsMock, config)
+		finding := CheckMemory(fsMock, cfg)
 		if finding.Severity != model.SeveritySkipped {
 			t.Errorf("expected Skipped severity on malformed file, got %v", finding.Severity)
 		}
@@ -83,7 +84,7 @@ func TestCheckMemory(t *testing.T) {
 			},
 		}
 
-		finding := CheckMemory(fsMock, config)
+		finding := CheckMemory(fsMock, cfg)
 		if finding.Severity != model.SeveritySkipped {
 			t.Errorf("expected Skipped severity on missing file, got %v", finding.Severity)
 		}

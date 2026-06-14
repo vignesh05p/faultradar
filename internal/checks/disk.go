@@ -3,12 +3,13 @@ package checks
 import (
 	"fmt"
 
+	"faultradar/internal/config"
 	"faultradar/internal/model"
 	"faultradar/internal/system"
 )
 
 // CheckDisk checks the root filesystem disk usage.
-func CheckDisk(fs system.FileSystem, config model.Config) model.Finding {
+func CheckDisk(fs system.FileSystem, cfg config.Config) model.Finding {
 	finding := model.Finding{
 		ID:           "disk.root.usage",
 		Title:        "Root disk usage check",
@@ -32,8 +33,8 @@ func CheckDisk(fs system.FileSystem, config model.Config) model.Finding {
 		percent = int((used*100 + totalUsable - 1) / totalUsable)
 	}
 
-	warningThreshold := config.Disk.RootWarningPercent
-	criticalThreshold := config.Disk.RootCriticalPercent
+	warningThreshold := cfg.Disk.RootWarningPercent
+	criticalThreshold := cfg.Disk.RootCriticalPercent
 
 	if percent >= criticalThreshold {
 		finding.Severity = model.SeverityCritical

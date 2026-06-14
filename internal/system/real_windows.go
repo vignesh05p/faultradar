@@ -34,3 +34,7 @@ func (RealFileSystem) WalkDir(root string, fn fs.WalkDirFunc) error {
 func (RealFileSystem) Statfs(path string) (FsInfo, error) {
 	return FsInfo{}, errors.New("statfs is not supported on windows")
 }
+
+func (RealFileSystem) ActualSize(info os.FileInfo) int64 {
+	return info.Size()
+}

@@ -9,7 +9,7 @@ import (
 	"faultradar/internal/system"
 )
 
-const version = "1.0.0"
+const version = "0.2.0"
 
 func main() {
 	if len(os.Args) < 2 {

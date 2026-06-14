@@ -7,12 +7,13 @@ import (
 	"path/filepath"
 
 	"faultradar/internal/checks"
+	"faultradar/internal/config"
 	"faultradar/internal/model"
 	"faultradar/internal/system"
 )
 
 type Doctor struct {
-	Config model.Config
+	Config config.Config
 	Runner system.CommandRunner
 	FS     system.FileSystem
 }
@@ -22,7 +23,7 @@ func (d Doctor) Run() []model.Finding {
 
 	findings = append(findings, checks.CheckDisk(d.FS, d.Config))
 	findings = append(findings, checks.CheckLogs(d.FS, d.Config))
-	findings = append(findings, checks.CheckSystemd(d.Runner, d.Config))
+	findings = append(findings, checks.CheckSystemd(d.Runner, d.Config)...)
 	findings = append(findings, checks.CheckKernel(d.Runner, d.Config))
 	findings = append(findings, checks.CheckMemory(d.FS, d.Config))
 
@@ -32,8 +33,8 @@ func (d Doctor) Run() []model.Finding {
 // LoadConfig searches for the configuration file in standard locations
 // and decodes it, fallback to default config if none is found.
 // It returns the config and optionally a list of warning findings if loading had non-fatal errors.
-func LoadConfig(fs system.FileSystem) (model.Config, []model.Finding) {
-	defaultConf := model.DefaultConfig()
+func LoadConfig(fs system.FileSystem) (config.Config, []model.Finding) {
+	defaultConf := config.DefaultConfig()
 	var findings []model.Finding
 
 	var paths []string

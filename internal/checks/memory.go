@@ -7,12 +7,13 @@ import (
 	"strconv"
 	"strings"
 
+	"faultradar/internal/config"
 	"faultradar/internal/model"
 	"faultradar/internal/system"
 )
 
 // CheckMemory checks memory and swap status using the injected FileSystem.
-func CheckMemory(sysFS system.FileSystem, config model.Config) model.Finding {
+func CheckMemory(sysFS system.FileSystem, cfg config.Config) model.Finding {
 	finding := model.Finding{
 		ID:           "memory.available",
 		Title:        "Memory available check",
@@ -61,8 +62,8 @@ func CheckMemory(sysFS system.FileSystem, config model.Config) model.Finding {
 
 	availPercent := int((memAvailable * 100) / memTotal)
 
-	warningThreshold := config.Memory.AvailableWarningPercent
-	criticalThreshold := config.Memory.AvailableCriticalPercent
+	warningThreshold := cfg.Memory.AvailableWarningPercent
+	criticalThreshold := cfg.Memory.AvailableCriticalPercent
 
 	finding.Details = []string{
 		fmt.Sprintf("Total Memory: %d MB", memTotal/1024),

@@ -3,11 +3,11 @@ package model
 type Severity string
 
 const (
-	SeverityOK       Severity = "ok"
-	SeverityInfo     Severity = "info"
-	SeverityWarning  Severity = "warning"
 	SeverityCritical Severity = "critical"
+	SeverityWarning  Severity = "warning"
+	SeverityInfo     Severity = "info"
 	SeveritySkipped  Severity = "skipped"
+	SeverityOK       Severity = "ok"
 )
 
 type Finding struct {

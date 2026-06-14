@@ -20,4 +20,5 @@ type FileSystem interface {
 	Stat(path string) (os.FileInfo, error)
 	WalkDir(root string, fn fs.WalkDirFunc) error
 	Statfs(path string) (FsInfo, error)
+	ActualSize(info os.FileInfo) int64
 }

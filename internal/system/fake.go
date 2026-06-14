@@ -19,10 +19,11 @@ func (f FakeCommandRunner) Run(name string, args ...string) ([]byte, error) {
 }
 
 type FakeFileSystem struct {
-	ReadFileFunc func(path string) ([]byte, error)
-	StatFunc     func(path string) (os.FileInfo, error)
-	WalkDirFunc  func(root string, fn fs.WalkDirFunc) error
-	StatfsFunc   func(path string) (FsInfo, error)
+	ReadFileFunc   func(path string) ([]byte, error)
+	StatFunc       func(path string) (os.FileInfo, error)
+	WalkDirFunc    func(root string, fn fs.WalkDirFunc) error
+	StatfsFunc     func(path string) (FsInfo, error)
+	ActualSizeFunc func(info os.FileInfo) int64
 }
 
 func (f FakeFileSystem) ReadFile(path string) ([]byte, error) {
@@ -53,10 +54,21 @@ func (f FakeFileSystem) Statfs(path string) (FsInfo, error) {
 	return FsInfo{}, errors.New("not implemented")
 }
 
+func (f FakeFileSystem) ActualSize(info os.FileInfo) int64 {
+	if f.ActualSizeFunc != nil {
+		return f.ActualSizeFunc(info)
+	}
+	if ffi, ok := info.(FakeFileInfo); ok && ffi.ActualSizeVal > 0 {
+		return ffi.ActualSizeVal
+	}
+	return info.Size()
+}
+
 type FakeFileInfo struct {
-	NameVal  string
-	SizeVal  int64
-	IsDirVal bool
+	NameVal       string
+	SizeVal       int64
+	IsDirVal      bool
+	ActualSizeVal int64
 }
 
 func (f FakeFileInfo) Name() string       { return f.NameVal }
